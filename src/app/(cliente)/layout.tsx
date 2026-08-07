@@ -38,7 +38,7 @@ export default async function ClienteLayout({
         mano. `pb-[env(safe-area-inset-bottom)]` evita que el indicador de inicio
         del iPhone tape los botones cuando corre instalada en modo standalone.
       */}
-      <nav className="fixed bottom-0 inset-x-0 border-t border-border bg-card pb-[env(safe-area-inset-bottom)]">
+      <nav className="fixed bottom-0 inset-x-0 z-50 border-t border-border bg-card pb-[env(safe-area-inset-bottom)]">
         <div className="mx-auto max-w-md grid grid-cols-6">
           {NAVEGACION.map(({ href, label, Icono }) => (
             <Link

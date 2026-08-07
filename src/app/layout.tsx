@@ -47,6 +47,9 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
+  // Sin viewport-fit=cover, iOS no expone env(safe-area-inset-*) y la barra
+  // inferior del cliente queda tapada por el indicador de inicio en standalone.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
