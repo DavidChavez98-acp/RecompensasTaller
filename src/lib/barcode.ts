@@ -139,8 +139,11 @@ async function lectorRespaldo(
     {
       preferredCamera: "environment",
       maxScansPerSecond: 10,
-      highlightScanRegion: true,
-      highlightCodeOutline: true,
+      // El componente EscanerQr ya dibuja su propio indicador de zona de
+      // escaneo. Los overlays del library añaden nodos al DOM que además
+      // pueden interferir con la captura de frames en iOS Safari.
+      highlightScanRegion: false,
+      highlightCodeOutline: false,
       returnDetailedScanResult: true,
     }
   );

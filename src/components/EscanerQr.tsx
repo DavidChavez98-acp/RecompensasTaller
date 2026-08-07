@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Camera, CameraOff } from "lucide-react";
-import { crearLectorQr, explicarErrorCamara, RESTRICCIONES_CAMARA, type LectorQr } from "@/lib/barcode";
+import { crearLectorQr, explicarErrorCamara, RESTRICCIONES_CAMARA, soportaBarcodeDetectorNativo, type LectorQr } from "@/lib/barcode";
 import { Button } from "@/components/ui/button";
 
 type Props = {
@@ -55,16 +55,25 @@ export function EscanerQr({ onDetectado, pausado = false }: Props) {
     yaDetectadoRef.current = false;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia(RESTRICCIONES_CAMARA);
-      streamRef.current = stream;
-
       const video = videoRef.current;
       if (!video) throw new Error("video no montado");
 
-      video.srcObject = stream;
-      // `playsInline` va en el JSX; sin él iOS abre el reproductor a pantalla
-      // completa y tapa la interfaz del asesor.
-      await video.play();
+      const usaNativo = await soportaBarcodeDetectorNativo();
+
+      if (usaNativo) {
+        // Camino nativo (Chrome Android): nosotros gestionamos la cámara, el
+        // BarcodeDetector solo lee frames del <video>.
+        const stream = await navigator.mediaDevices.getUserMedia(RESTRICCIONES_CAMARA);
+        streamRef.current = stream;
+        video.srcObject = stream;
+        // `playsInline` va en el JSX; sin él iOS abre el reproductor a pantalla
+        // completa y tapa la interfaz del asesor.
+        await video.play();
+      }
+      // Camino de respaldo (iOS / navegadores sin BarcodeDetector): `qr-scanner`
+      // adquiere su propia cámara al llamar `start()`. Pedir un segundo stream
+      // aquí conflictuaría en iOS, donde solo puede haber un stream de cámara
+      // activo a la vez — el segundo mata al primero y la detección no funciona.
 
       const lector = await crearLectorQr(video, (texto) => {
         if (yaDetectadoRef.current) return;
