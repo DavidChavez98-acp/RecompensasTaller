@@ -29,7 +29,7 @@ export default async function CuentaPage() {
 
   return (
     <div className="space-y-5">
-      <h1 className="text-xl font-semibold">Mi cuenta</h1>
+      <h1 className="t-titulo">Mi cuenta</h1>
 
       <Card>
         <CardContent className="py-4 space-y-3 text-sm">

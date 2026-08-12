@@ -16,14 +16,15 @@
 "use server";
 
 import { db } from "@/db";
-import { premios, users } from "@/db/schema";
+import { articulos, premios } from "@/db/schema";
 import { and, asc, eq, isNull, lte, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getSesionInterna } from "./auth-interno";
-import { puedeGestionarPremios } from "@/lib/authz";
+import { puedeGestionarInventario, puedeGestionarPremios } from "@/lib/authz";
 import { premioSchema, ajustarStockSchema, type PremioInput } from "@/lib/validations";
 import { logAdminAction } from "@/lib/admin-audit";
-import { sendEmail, getBaseUrl } from "@/lib/mail";
+import { aplicarMovimientoInventario, aplicarMovimientoInventarioEnTx } from "@/lib/inventario";
+import { avisarStockBajo } from "@/lib/stock-alertas.server";
 import type { TipoPremio } from "@/db/schema";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -54,9 +55,12 @@ export async function listarCatalogo(): Promise<PremioCatalogo[]> {
       tipo: premios.tipo,
       costoPuntos: premios.costo_puntos,
       imagenUrl: premios.imagen_url,
-      stock: premios.stock,
+      // stock del ARTÍCULO enlazado, no de `premios.stock` (deprecado). NULL
+      // cuando no hay artículo (servicio: no se agota).
+      stock: articulos.stock_cache,
     })
     .from(premios)
+    .leftJoin(articulos, eq(articulos.id, premios.articulo_id))
     .where(
       and(
         eq(premios.activo, true),
@@ -107,12 +111,13 @@ export async function listarPremiosAdmin(): Promise<PremioAdmin[]> {
       descripcion: premios.descripcion,
       tipo: premios.tipo,
       costoPuntos: premios.costo_puntos,
-      stock: premios.stock,
-      stockMinimoAlerta: premios.stock_minimo_alerta,
+      stock: articulos.stock_cache,
+      stockMinimoAlerta: articulos.stock_minimo_alerta,
       activo: premios.activo,
       orden: premios.orden,
     })
     .from(premios)
+    .leftJoin(articulos, eq(articulos.id, premios.articulo_id))
     .orderBy(asc(premios.orden), asc(premios.nombre));
 }
 
@@ -139,26 +144,71 @@ export async function crearPremio(
 
   if (existente) return { ok: false, error: `Ya existe un premio con el código ${datos.codigo}.` };
 
-  const [creado] = await db
-    .insert(premios)
-    .values({
-      codigo: datos.codigo,
-      nombre: datos.nombre,
-      descripcion: datos.descripcion || null,
-      tipo: datos.tipo,
-      costo_puntos: datos.costo_puntos,
-      stock: datos.stock,
-      stock_minimo_alerta: datos.stock_minimo_alerta,
-      activo: datos.activo,
-      sucursal_id: sesion.sucursal_id,
-    })
-    .returning({ id: premios.id });
+  /*
+   * Un merchandising EXIGE un artículo enlazado (lo impone
+   * `premios_articulo_segun_tipo`, ver drizzle/0005_backfill_articulos.sql).
+   * Se crea aquí, en la misma transacción que el premio: sin eso, un premio
+   * merchandising podría quedar un instante sin inventario que representar.
+   *
+   * El código del artículo reutiliza el del premio — son namespaces UNIQUE
+   * distintos, no colisionan — así que "GORRA" es reconocible como el mismo
+   * objeto en las dos tablas sin inventar un mapeo.
+   */
+  const creadoId = await db.transaction(async (tx) => {
+    let articuloId: string | null = null;
+
+    if (datos.tipo === "merchandising") {
+      const [articulo] = await tx
+        .insert(articulos)
+        .values({
+          codigo: datos.codigo,
+          nombre: datos.nombre,
+          stock_cache: 0,
+          stock_minimo_alerta: datos.stock_minimo_alerta,
+          sucursal_id: sesion.sucursal_id,
+        })
+        .returning({ id: articulos.id });
+      if (!articulo) throw new Error("No se pudo crear el artículo del inventario.");
+      articuloId = articulo.id;
+
+      // Stock inicial declarado por el admin, si lo hay. Va por el ledger para
+      // que quede explicado en vez de escrito a mano en el caché.
+      if (datos.stock && datos.stock > 0) {
+        const movimiento = await aplicarMovimientoInventarioEnTx(tx, {
+          articuloId,
+          motivo: "ajuste_conteo",
+          cantidad: datos.stock,
+          motivoTexto: "Alta inicial del premio en el catálogo",
+          creadoPorId: sesion.id,
+          creadoPorNombre: sesion.nombre,
+          creadoPorRol: sesion.role,
+        });
+        if (!movimiento.ok) throw new Error("No se pudo registrar el stock inicial.");
+      }
+    }
+
+    const [creado] = await tx
+      .insert(premios)
+      .values({
+        codigo: datos.codigo,
+        nombre: datos.nombre,
+        descripcion: datos.descripcion || null,
+        tipo: datos.tipo,
+        costo_puntos: datos.costo_puntos,
+        articulo_id: articuloId,
+        activo: datos.activo,
+        sucursal_id: sesion.sucursal_id,
+      })
+      .returning({ id: premios.id });
+
+    return creado?.id ?? null;
+  });
 
   await logAdminAction(
     { id: sesion.id, email: sesion.email, nombre: sesion.nombre },
     "premio_creado",
     "premios",
-    creado?.id ?? null,
+    creadoId,
     { ...datos }
   );
 
@@ -186,22 +236,40 @@ export async function actualizarPremio(
   const [anterior] = await db.select().from(premios).where(eq(premios.id, premioId)).limit(1);
   if (!anterior) return { ok: false, error: "Ese premio no existe." };
 
+  /*
+   * El formulario deshabilita el campo `tipo` al editar (ver GestionPremios.tsx:
+   * "el tipo no se cambia después de crear el premio"), pero eso es cosmético —
+   * cualquiera puede llamar a esta acción directamente. Server-side es donde
+   * cuenta: cambiar de tipo dejaría un merchandising sin artículo enlazado o un
+   * servicio con uno de sobra, violando `premios_articulo_segun_tipo`.
+   */
+  if (datos.tipo !== anterior.tipo) {
+    return { ok: false, error: "El tipo de premio no se puede cambiar después de creado." };
+  }
+
   await db
     .update(premios)
     .set({
       codigo: datos.codigo,
       nombre: datos.nombre,
       descripcion: datos.descripcion || null,
-      tipo: datos.tipo,
       costo_puntos: datos.costo_puntos,
       // El stock NO se edita aquí: para eso está `ajustarStock`, que exige
       // motivo y deja rastro en auditoría. Cambiarlo desde el formulario
       // general permitiría "corregir" un descuadre sin explicar por qué.
-      stock_minimo_alerta: datos.stock_minimo_alerta,
       activo: datos.activo,
       fecha_actualizacion: new Date(),
     })
     .where(eq(premios.id, premioId));
+
+  // El umbral de alerta vive en el ARTÍCULO, no en el premio (deprecado):
+  // aquí es donde `avisarStockBajo` lo lee de verdad.
+  if (anterior.articulo_id) {
+    await db
+      .update(articulos)
+      .set({ stock_minimo_alerta: datos.stock_minimo_alerta, fecha_actualizacion: new Date() })
+      .where(eq(articulos.id, anterior.articulo_id));
+  }
 
   await logAdminAction(
     { id: sesion.id, email: sesion.email, nombre: sesion.nombre },
@@ -230,7 +298,7 @@ export async function ajustarStock(entrada: {
 }): Promise<{ ok: boolean; error?: string; stockNuevo?: number }> {
   const sesion = await getSesionInterna();
   if (!sesion) return { ok: false, error: "Tu sesión venció." };
-  if (!puedeGestionarPremios(sesion)) {
+  if (!puedeGestionarInventario(sesion)) {
     return { ok: false, error: "Tu rol no permite ajustar inventario." };
   }
 
@@ -242,31 +310,28 @@ export async function ajustarStock(entrada: {
 
   const [premio] = await db.select().from(premios).where(eq(premios.id, datos.premio_id)).limit(1);
   if (!premio) return { ok: false, error: "Ese premio no existe." };
-  if (premio.stock === null) {
+  if (!premio.articulo_id) {
     return { ok: false, error: "Los servicios no llevan inventario." };
   }
 
-  // UPDATE condicional, igual que el saldo de puntos: si dos personas de
-  // marketing ajustan a la vez, la resta no puede dejar el stock negativo.
-  const filas = await db
-    .update(premios)
-    .set({
-      stock: sql`${premios.stock} + ${datos.cantidad}`,
-      fecha_actualizacion: new Date(),
-    })
-    .where(
-      and(
-        eq(premios.id, datos.premio_id),
-        datos.cantidad < 0
-          ? sql`${premios.stock} >= ${-datos.cantidad}`
-          : sql`${premios.stock} IS NOT NULL`
-      )
-    )
-    .returning({ stock: premios.stock });
+  // Va por el ledger de inventario, no por un UPDATE directo a `premios.stock`
+  // (deprecado): es la misma primitiva atómica que usa cualquier otro
+  // movimiento, con el mismo UPDATE condicional contra negativos.
+  const movimiento = await aplicarMovimientoInventario({
+    articuloId: premio.articulo_id,
+    motivo: "ajuste_conteo",
+    cantidad: datos.cantidad,
+    motivoTexto: datos.motivo,
+    creadoPorId: sesion.id,
+    creadoPorNombre: sesion.nombre,
+    creadoPorRol: sesion.role,
+  });
 
-  const fila = filas[0];
-  if (!fila) {
-    return { ok: false, error: `No hay tantas unidades: quedan ${premio.stock}.` };
+  if (!movimiento.ok) {
+    if (movimiento.motivo === "stock_insuficiente") {
+      return { ok: false, error: `No hay tantas unidades: quedan ${movimiento.stockActual ?? 0}.` };
+    }
+    return { ok: false, error: movimiento.detalle ?? "No se pudo ajustar el inventario." };
   }
 
   await logAdminAction(
@@ -274,51 +339,12 @@ export async function ajustarStock(entrada: {
     "stock_ajustado",
     "premios",
     datos.premio_id,
-    { cantidad: datos.cantidad, motivo: datos.motivo, stockAnterior: premio.stock, stockNuevo: fila.stock },
+    { cantidad: datos.cantidad, motivo: datos.motivo, stockNuevo: movimiento.stockPosterior },
   );
 
   await avisarStockBajo(premio.id);
 
   revalidatePath("/interno/premios");
   revalidatePath("/premios");
-  return { ok: true, stockNuevo: fila.stock ?? 0 };
-}
-
-/**
- * Avisa por correo al Admin cuando un merchandising baja del umbral.
- *
- * Best-effort: un fallo de correo nunca debe tumbar la operación que ya se
- * ejecutó. Mismo criterio que `logAdminAction`.
- */
-export async function avisarStockBajo(premioId: string): Promise<void> {
-  try {
-    const [premio] = await db.select().from(premios).where(eq(premios.id, premioId)).limit(1);
-    if (!premio || premio.stock === null || premio.stock_minimo_alerta === null) return;
-    if (premio.stock > premio.stock_minimo_alerta) return;
-
-    const destinatarios = await db
-      .select({ email: users.email })
-      .from(users)
-      .where(and(eq(users.activo, true), eq(users.notif_stock_bajo, true)));
-
-    const correos = destinatarios.map((d) => d.email).filter((e): e is string => !!e);
-    if (correos.length === 0) return;
-
-    const agotado = premio.stock === 0;
-    await sendEmail({
-      to: correos,
-      subject: agotado
-        ? `Sin stock: ${premio.nombre}`
-        : `Stock bajo: ${premio.nombre} (quedan ${premio.stock})`,
-      html: `
-        <p>${agotado ? "Se agotó" : "Está por agotarse"} un premio del catálogo:</p>
-        <p><strong>${premio.nombre}</strong> — quedan ${premio.stock} unidad(es).</p>
-        <p>Los clientes lo seguirán viendo marcado como agotado hasta que repongas.</p>
-        <p><a href="${getBaseUrl()}/interno/premios">Ir al catálogo</a></p>
-      `,
-      text: `${premio.nombre}: quedan ${premio.stock} unidades.`,
-    });
-  } catch (error) {
-    console.error("No se pudo avisar del stock bajo:", (error as Error)?.message);
-  }
+  return { ok: true, stockNuevo: movimiento.stockPosterior };
 }

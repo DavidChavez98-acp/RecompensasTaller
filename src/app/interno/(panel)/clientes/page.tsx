@@ -17,7 +17,7 @@ export default async function ClientesPage() {
   return (
     <div className="space-y-5 max-w-2xl">
       <div>
-        <h1 className="text-xl font-semibold">Clientes</h1>
+        <h1 className="t-titulo">Clientes</h1>
         <p className="text-sm text-muted-foreground">
           Busca por nombre o por cédula completa. La cédula está cifrada, así que solo se puede
           buscar exacta, no por partes.

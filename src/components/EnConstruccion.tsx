@@ -21,7 +21,7 @@ export function EnConstruccion({
 }) {
   return (
     <div className="space-y-5">
-      <h1 className="text-xl font-semibold">{titulo}</h1>
+      <h1 className="t-titulo">{titulo}</h1>
       <Card>
         <CardContent className="py-8 text-center text-sm text-muted-foreground">
           {descripcion}

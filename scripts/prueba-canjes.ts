@@ -18,9 +18,11 @@ config({ path: [".env.local", ".env"], quiet: true });
 import { eq, sql, inArray } from "drizzle-orm";
 import { db, cerrarPool } from "../src/db/index";
 import {
+  articulos,
   canjeHistorial,
   canjes,
   clientes,
+  movimientosInventario,
   premios,
   puntosTransacciones,
   sucursales,
@@ -46,7 +48,12 @@ function comprobar(condicion: boolean, descripcion: string, detalle?: string) {
   }
 }
 
-async function limpiar(clienteIds: string[], usuarioId: string | null, premioIds: string[]) {
+async function limpiar(
+  clienteIds: string[],
+  usuarioId: string | null,
+  premioIds: string[],
+  articuloIds: string[]
+) {
   if (clienteIds.length > 0) {
     const filasCanje = await db
       .select({ id: canjes.id })
@@ -59,18 +66,31 @@ async function limpiar(clienteIds: string[], usuarioId: string | null, premioIds
     await db.execute(sql`ALTER TABLE puntos_transacciones ENABLE TRIGGER puntos_transacciones_append_only`);
 
     if (canjeIds.length > 0) {
+      // Cada aprobación dejó una fila en movimientos_inventario con
+      // canje_id: hay que borrarla antes que el canje, o la FK lo impide.
+      await db.execute(sql`ALTER TABLE movimientos_inventario DISABLE TRIGGER movimientos_inventario_append_only`);
+      await db.delete(movimientosInventario).where(inArray(movimientosInventario.canje_id, canjeIds));
+      await db.execute(sql`ALTER TABLE movimientos_inventario ENABLE TRIGGER movimientos_inventario_append_only`);
+
       await db.delete(canjeHistorial).where(inArray(canjeHistorial.canje_id, canjeIds));
       await db.delete(canjes).where(inArray(canjes.id, canjeIds));
     }
     await db.delete(clientes).where(inArray(clientes.id, clienteIds));
   }
   if (premioIds.length > 0) await db.delete(premios).where(inArray(premios.id, premioIds));
+  if (articuloIds.length > 0) {
+    await db.execute(sql`ALTER TABLE movimientos_inventario DISABLE TRIGGER movimientos_inventario_append_only`);
+    await db.delete(movimientosInventario).where(inArray(movimientosInventario.articulo_id, articuloIds));
+    await db.execute(sql`ALTER TABLE movimientos_inventario ENABLE TRIGGER movimientos_inventario_append_only`);
+    await db.delete(articulos).where(inArray(articulos.id, articuloIds));
+  }
   if (usuarioId) await db.delete(users).where(eq(users.id, usuarioId));
 }
 
 async function main() {
   const clienteIds: string[] = [];
   const premioIds: string[] = [];
+  const articuloIds: string[] = [];
   let usuarioId: string | null = null;
   let premioId: string | null = null;
 
@@ -84,6 +104,16 @@ async function main() {
       .returning({ id: users.id });
     usuarioId = usuario!.id;
 
+    // El stock vive en el ARTÍCULO, no en `premios.stock` (deprecado): un
+    // merchandising exige uno enlazado, es lo que impone el CHECK
+    // `premios_articulo_segun_tipo`.
+    const [articuloGorra] = await db
+      .insert(articulos)
+      .values({ codigo: `${MARCA}_GORRA_${Date.now()}`, nombre: "Gorra de prueba", stock_cache: 1 })
+      .returning({ id: articulos.id });
+    const articuloGorraId = articuloGorra!.id;
+    articuloIds.push(articuloGorraId);
+
     // Merchandising con UNA sola unidad: la gorra en disputa.
     const [premio] = await db
       .insert(premios)
@@ -92,7 +122,7 @@ async function main() {
         nombre: "Gorra de prueba",
         tipo: "merchandising",
         costo_puntos: 500,
-        stock: 1,
+        articulo_id: articuloGorraId,
         sucursal_id: sucursal.id,
       })
       .returning({ id: premios.id });
@@ -246,9 +276,9 @@ async function main() {
     );
 
     const [stockFinal] = await db
-      .select({ stock: premios.stock })
-      .from(premios)
-      .where(eq(premios.id, premioId!));
+      .select({ stock: articulos.stock_cache })
+      .from(articulos)
+      .where(eq(articulos.id, articuloGorraId));
     comprobar(stockFinal?.stock === 0, "el stock queda en 0, nunca negativo", `es ${stockFinal?.stock}`);
 
     // Los 5 rechazados deben seguir en 'solicitado' para que el Jefe los
@@ -310,12 +340,12 @@ async function main() {
     console.log("\n4. Cancelar un canje aprobado devuelve el stock");
     await devolverStock(premioId!);
     const [trasDevolver] = await db
-      .select({ stock: premios.stock })
-      .from(premios)
-      .where(eq(premios.id, premioId!));
+      .select({ stock: articulos.stock_cache })
+      .from(articulos)
+      .where(eq(articulos.id, articuloGorraId));
     comprobar(trasDevolver?.stock === 1, "la gorra vuelve al catálogo", `stock ${trasDevolver?.stock}`);
 
-    // ── 5. Un servicio (stock null) no se agota nunca ────────────────────────
+    // ── 5. Un servicio (sin artículo enlazado) no se agota nunca ─────────────
     console.log("\n5. Los servicios no se agotan");
     const [servicio] = await db
       .insert(premios)
@@ -324,7 +354,6 @@ async function main() {
         nombre: "Cambio de aceite de prueba",
         tipo: "servicio",
         costo_puntos: 100,
-        stock: null,
         sucursal_id: sucursal.id,
       })
       .returning({ id: premios.id });
@@ -367,12 +396,12 @@ async function main() {
     );
 
     const [stockServicio] = await db
-      .select({ stock: premios.stock })
+      .select({ articuloId: premios.articulo_id })
       .from(premios)
       .where(eq(premios.id, servicio!.id));
-    comprobar(stockServicio?.stock === null, "el stock del servicio sigue siendo nulo (sin límite)");
+    comprobar(stockServicio?.articuloId === null, "el servicio no tiene artículo enlazado (sin límite)");
   } finally {
-    await limpiar(clienteIds, usuarioId, premioIds);
+    await limpiar(clienteIds, usuarioId, premioIds, articuloIds);
     await cerrarPool();
   }
 

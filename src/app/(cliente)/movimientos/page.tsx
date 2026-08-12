@@ -40,7 +40,7 @@ export default async function MovimientosPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold">Mis puntos</h1>
+        <h1 className="t-titulo">Mis puntos</h1>
         <p className="text-sm text-muted-foreground">
           Saldo actual: {formatearPuntos(sesion.saldo)} puntos.
         </p>

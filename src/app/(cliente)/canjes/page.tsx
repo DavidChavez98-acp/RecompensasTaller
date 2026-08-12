@@ -22,7 +22,7 @@ export default async function CanjesPage() {
 
   return (
     <div className="space-y-5">
-      <h1 className="text-xl font-semibold">Mis canjes</h1>
+      <h1 className="t-titulo">Mis canjes</h1>
 
       {canjes.length === 0 ? (
         <Card>

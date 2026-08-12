@@ -45,12 +45,39 @@ import {
 // Enumeraciones
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** "Marketing" se declara ahora aunque v1 no lo asigne: ver nota de cabecera. */
+/**
+ * Cinco roles, dos dominios que NO se cruzan a propósito:
+ *
+ *  Taller     → Jefe de Taller, Asesor de Servicio (canjes, puntos, clientes)
+ *  Marketing  → Jefe de Marketing, Asesor Comercial (artículos, stock)
+ *
+ * "Jefe de Marketing gestiona el inventario porque es quien sabe lo que tiene
+ * físicamente" — decisión explícita del dueño del producto: el taller NO debe
+ * poder tocar el inventario de marketing, ni para consultarlo. El único punto
+ * de contacto entre los dos dominios es aprobar un canje, que ya descuenta el
+ * artículo por su cuenta sin que el Jefe de Taller necesite permiso de
+ * inventario (ver `aprobarCanjeAtomico`).
+ *
+ * "Asesor" se renombró a "Asesor de Servicio" para poder distinguirlo de
+ * "Asesor Comercial" — antes de este cambio un solo nombre cubría dos
+ * trabajos distintos (acreditar puntos vs. sacar mercadería de bodega).
+ * `ALTER TYPE ... RENAME VALUE` es no-destructivo: las filas existentes con
+ * role='Asesor' pasan a leer 'Asesor de Servicio' sin tocar datos.
+ */
+/*
+ * El orden aquí es el mismo con el que quedó el tipo en Postgres tras
+ * `drizzle/0006_roles_taller_marketing.sql` (dos RENAME VALUE + un ADD VALUE,
+ * que siempre añade al final). El orden de un enum de Postgres no afecta nada
+ * en la aplicación —las comparaciones son por igualdad de texto, nunca por
+ * orden—, así que declararlo distinto aquí solo serviría para que
+ * `drizzle-kit generate` intentara un DROP + CREATE TYPE innecesario.
+ */
 export const userRoleEnum = pgEnum("user_role", [
   "Admin",
   "Jefe de Taller",
-  "Asesor",
-  "Marketing",
+  "Asesor de Servicio",
+  "Jefe de Marketing",
+  "Asesor Comercial",
 ]);
 
 export const tipoTransaccionEnum = pgEnum("tipo_transaccion", [
@@ -73,6 +100,31 @@ export const estadoCanjeEnum = pgEnum("estado_canje", [
   "entregado",
   "rechazado",
   "cancelado",
+]);
+
+/**
+ * Motivos de movimiento del inventario de marketing.
+ *
+ * El prefijo NO es decorativo: `ingreso_*` obliga a cantidad positiva y
+ * `salida_*` a cantidad negativa, y eso se comprueba en `inventario.ts` y en
+ * un CHECK de la base. Sin esa regla, un ledger con signo convierte un error
+ * de signo en una entrada silenciosa que nadie detecta hasta el conteo físico.
+ *
+ * `ajuste_conteo` es el único que admite ambos signos, porque un conteo puede
+ * revelar tanto faltante como sobrante.
+ *
+ * Va completo desde el día 1 aunque v1 no use todos los valores: ver la nota
+ * de cabecera sobre `ALTER TYPE ... ADD VALUE`.
+ */
+export const motivoInventarioEnum = pgEnum("motivo_inventario", [
+  "ingreso_compra", //          + recepción de mercadería del proveedor
+  "ingreso_devolucion", //      + lo que volvió de una feria o evento
+  "ajuste_conteo", //           ± corrección tras conteo físico
+  "salida_canje", //            − canje aprobado en el taller
+  "salida_entrega_vehiculo", // − obsequio al entregar un vehículo
+  "salida_evento", //           − feria, activación, patrocinio
+  "salida_merma", //            − daño, robo, vencimiento
+  "salida_interna", //          − uso del propio concesionario
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -101,7 +153,7 @@ export const users = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     email: text("email").unique(),
     nombre: text("nombre").notNull(),
-    role: userRoleEnum("role").default("Asesor").notNull(),
+    role: userRoleEnum("role").default("Asesor de Servicio").notNull(),
     sucursal_id: uuid("sucursal_id").references(() => sucursales.id),
     /**
      * Índice ciego de la cédula del empleado. No es decorativo: es lo que
@@ -240,6 +292,54 @@ export const clientes = pgTable(
     // tampoco funciona.
     index("clientes_nombres_idx").on(t.nombres),
     check("clientes_saldo_no_negativo", sql`${t.saldo_cache} >= 0`),
+  ]
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Vehículos
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * El chasis, no la cédula, es lo que el Jefe de Taller usa para decidir qué
+ * darle a un cliente: "¿qué se le ha hecho a ESTE auto?" importa más en el
+ * mostrador que quién es su dueño en papel. Un cliente puede tener varios
+ * vehículos (familia con dos autos, alguien que cambió de carro).
+ *
+ * SIN CIFRAR, a diferencia de `clientes.identificacion`. El chasis identifica
+ * al VEHÍCULO, no directamente a una persona, y el asesor lo teclea en el
+ * mostrador constantemente — cifrarlo exigiría el mismo mecanismo de índice
+ * ciego que la cédula sin un beneficio de privacidad claro a cambio. Sigue
+ * protegido por sesión igual que el resto de `/interno`.
+ */
+export const vehiculos = pgTable(
+  "vehiculos",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    cliente_id: uuid("cliente_id")
+      .references(() => clientes.id)
+      .notNull(),
+    /** VIN de 17 caracteres o el identificador que use el taller si el auto no lo tiene. */
+    chasis: text("chasis").notNull(),
+    /**
+     * La placa SÍ puede cambiar (reasignación, venta, matriculación nueva);
+     * el chasis no. Por eso el chasis es la clave de búsqueda y la placa es
+     * un dato de contexto que se actualiza aparte.
+     */
+    placa: text("placa"),
+    marca: text("marca"),
+    modelo: text("modelo"),
+    anio: integer("anio"),
+    color: text("color"),
+    activo: boolean("activo").default(true).notNull(),
+    creado_por_id: uuid("creado_por_id").references(() => users.id),
+    fecha_creacion: timestamp("fecha_creacion", { withTimezone: true }).defaultNow().notNull(),
+    fecha_actualizacion: timestamp("fecha_actualizacion", { withTimezone: true }),
+  },
+  (t) => [
+    // Un chasis identifica un auto físico: no puede haber dos filas para el
+    // mismo. Si cambia de dueño, se reasigna `cliente_id`, no se duplica.
+    uniqueIndex("vehiculos_chasis_uq").on(t.chasis),
+    index("vehiculos_cliente_id_idx").on(t.cliente_id),
   ]
 );
 
@@ -392,6 +492,61 @@ export const reglasPuntos = pgTable(
 // Premios y canjes
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * El inventario físico de marketing.
+ *
+ * ── Por qué no vive dentro de `premios` ──
+ * Un premio es una OFERTA del catálogo: costo en puntos, imagen, orden,
+ * ventana de visibilidad. Un artículo es una COSA en bodega: unidades, costo
+ * unitario, umbral de reposición. Mientras el único camino de salida fue el
+ * canje, fundirlos en una fila funcionaba. Ya no:
+ *
+ *     una gorra ──┬─ canje aprobado en el taller
+ *                 ├─ obsequio al entregar un vehículo
+ *                 ├─ feria / activación
+ *                 └─ merma
+ *
+ * Y al revés: un roll-up o un tríptico son artículos que ningún cliente puede
+ * canjear nunca. Con el modelo viejo simplemente no se podían registrar.
+ *
+ * `stock_cache` es una DENORMALIZACIÓN, exactamente igual que
+ * `clientes.saldo_cache`: la verdad es `SUM(cantidad)` sobre
+ * `movimientos_inventario`. Se actualiza en la misma transacción que el ledger
+ * para que la lista de artículos no dispare un SUM() por fila.
+ */
+export const articulos = pgTable(
+  "articulos",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    codigo: text("codigo").notNull().unique(),
+    nombre: text("nombre").notNull(),
+    descripcion: text("descripcion"),
+    /** "unidad", "caja", "par"… Solo informativo, no convierte entre sí. */
+    unidad: text("unidad").default("unidad").notNull(),
+
+    stock_cache: integer("stock_cache").default(0).notNull(),
+    stock_cache_actualizado: timestamp("stock_cache_actualizado", { withTimezone: true }),
+    /** Umbral de aviso por correo al Admin. NULL = sin aviso. */
+    stock_minimo_alerta: integer("stock_minimo_alerta"),
+
+    /**
+     * Último costo unitario conocido, para valorar el inventario. El costo
+     * histórico de cada compra vive en su fila del ledger; este es el vigente.
+     */
+    costo_unitario: numeric("costo_unitario", { precision: 10, scale: 2 }),
+
+    imagen_url: text("imagen_url"),
+    activo: boolean("activo").default(true).notNull(),
+    sucursal_id: uuid("sucursal_id").references(() => sucursales.id),
+    fecha_creacion: timestamp("fecha_creacion", { withTimezone: true }).defaultNow().notNull(),
+    fecha_actualizacion: timestamp("fecha_actualizacion", { withTimezone: true }),
+  },
+  (t) => [
+    index("articulos_activo_nombre_idx").on(t.activo, t.nombre),
+    check("articulos_stock_no_negativo", sql`${t.stock_cache} >= 0`),
+  ]
+);
+
 export const premios = pgTable(
   "premios",
   {
@@ -407,7 +562,20 @@ export const premios = pgTable(
     tipo: tipoPremioEnum("tipo").default("merchandising").notNull(),
     costo_puntos: integer("costo_puntos").notNull(),
     imagen_url: text("imagen_url"),
-    /** NULL = ilimitado (servicios). Entero = unidades reales en bodega. */
+    /**
+     * El artículo físico que este premio entrega. Un `merchandising` DEBE
+     * apuntar a uno; un `servicio` NO (un cambio de aceite no se agota).
+     *
+     * Nullable en el esquema porque la migración que rellena esta columna y la
+     * que endurece el CHECK van separadas a propósito: el backfill se verifica
+     * contra datos de producción antes de prohibir el estado intermedio.
+     */
+    articulo_id: uuid("articulo_id").references(() => articulos.id),
+    /**
+     * @deprecated El inventario se mudó a `articulos.stock_cache`. Esta columna
+     * sobrevive solo hasta que la migración del backfill se verifique en
+     * producción; después se cae en una migración aparte. NO escribas aquí.
+     */
     stock: integer("stock"),
     /** Umbral de aviso por correo al Admin. NULL = sin aviso. */
     stock_minimo_alerta: integer("stock_minimo_alerta"),
@@ -423,12 +591,17 @@ export const premios = pgTable(
   (t) => [
     index("premios_activo_orden_idx").on(t.activo, t.orden),
     check("premios_costo_positivo", sql`${t.costo_puntos} > 0`),
+    // `stock` deprecado, ver comentario en la columna. El CHECK viejo sobre
+    // `stock IS NULL OR stock >= 0` se deja: es inerte (nada escribe ahí ya)
+    // y no hace daño quitarlo en una migración aparte cuando caiga la columna.
     check("premios_stock_no_negativo", sql`${t.stock} IS NULL OR ${t.stock} >= 0`),
-    // Un merchandising sin stock declarado sería un premio infinito por
-    // descuido; un servicio con stock sería inventario fantasma.
+    // Un merchandising sin artículo enlazado sería un premio infinito por
+    // descuido; un servicio con artículo sería inventario fantasma. Reemplaza
+    // a `premios_stock_segun_tipo` (drizzle/0005_backfill_articulos.sql):
+    // el stock vive en `articulos`, no en esta tabla.
     check(
-      "premios_stock_segun_tipo",
-      sql`(${t.tipo} = 'merchandising' AND ${t.stock} IS NOT NULL) OR (${t.tipo} <> 'merchandising' AND ${t.stock} IS NULL)`
+      "premios_articulo_segun_tipo",
+      sql`(${t.tipo} = 'merchandising' AND ${t.articulo_id} IS NOT NULL) OR (${t.tipo} <> 'merchandising' AND ${t.articulo_id} IS NULL)`
     ),
   ]
 );
@@ -548,6 +721,15 @@ export const puntosTransacciones = pgTable(
     servicio_tipo_id: uuid("servicio_tipo_id").references(() => serviciosTipo.id),
     multiplicador_aplicado: numeric("multiplicador_aplicado", { precision: 6, scale: 3 }),
     regla_id: uuid("regla_id").references(() => reglasPuntos.id),
+    /**
+     * Nullable a propósito: el ledger ya funcionaba sin vehículo, y una
+     * acreditación vieja o un ajuste manual sin auto asociado siguen siendo
+     * válidos. Cuando SÍ hay vehículo, esta columna es lo que convierte el
+     * ledger en el historial "qué se le hizo a este chasis" que pide el Jefe
+     * de Taller — sin tabla nueva de órdenes de trabajo, es el mismo dato que
+     * ya se capturaba, visto agrupado por auto en vez de por cliente.
+     */
+    vehiculo_id: uuid("vehiculo_id").references(() => vehiculos.id),
 
     // ── Trazabilidad ──
     escaneo_id: uuid("escaneo_id").references(() => qrEscaneos.id),
@@ -579,6 +761,8 @@ export const puntosTransacciones = pgTable(
     // Historial del cliente y lectura de la última fila: el índice que se usa
     // en el 90% de las consultas.
     index("puntos_transacciones_cliente_fecha_idx").on(t.cliente_id, t.fecha_creacion.desc()),
+    // El historial "qué se le hizo a este chasis" que pide el Jefe de Taller.
+    index("puntos_transacciones_vehiculo_fecha_idx").on(t.vehiculo_id, t.fecha_creacion.desc()),
 
     // Un escaneo produce como máximo UNA acreditación. Estructural, no por
     // lógica de aplicación: ni un doble submit ni un reintento de red pueden
@@ -612,16 +796,120 @@ export const puntosTransacciones = pgTable(
   ]
 );
 
+/**
+ * El ledger del inventario de marketing. APPEND-ONLY, igual que
+ * `puntos_transacciones` y por las mismas razones — el trigger vive en
+ * `drizzle/0004_inventario_append_only.sql`.
+ *
+ * Si el ledger de puntos existe porque el programa es un PASIVO contable, este
+ * existe porque el inventario es un ACTIVO. "¿Por qué hay 12 gorras y no 40?"
+ * tiene que responderse con filas, no con "porque el número dice 12".
+ *
+ * Para corregir NO se edita una fila: se inserta un `ajuste_conteo`.
+ */
+export const movimientosInventario = pgTable(
+  "movimientos_inventario",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    /** Orden total determinista, igual que en el ledger de puntos. */
+    secuencia: bigserial("secuencia", { mode: "number" }).notNull(),
+
+    articulo_id: uuid("articulo_id")
+      .references(() => articulos.id)
+      .notNull(),
+    motivo: motivoInventarioEnum("motivo").notNull(),
+    /**
+     * CON SIGNO. Positivo entra, negativo sale. El stock es un SUM(), no un
+     * CASE/WHEN sobre el motivo.
+     */
+    cantidad: integer("cantidad").notNull(),
+    /** Del RETURNING del UPDATE condicional, nunca de una resta en JavaScript. */
+    stock_posterior: integer("stock_posterior").notNull(),
+
+    // ── De dónde vino la salida (todos nullables, excluyentes en la práctica) ──
+    /** Canje aprobado en el taller. */
+    canje_id: uuid("canje_id").references(() => canjes.id),
+    /**
+     * Entrega de vehículo. Cierra el círculo que pidió el Jefe de Taller: por
+     * el chasis se ve tanto el historial de servicios como lo que se obsequió.
+     */
+    vehiculo_id: uuid("vehiculo_id").references(() => vehiculos.id),
+    /**
+     * Feria, activación o patrocinio. Texto libre a propósito: el mismo valor
+     * enlaza la `salida_evento` con el `ingreso_devolucion` de lo que sobró, y
+     * es lo que hace posible el reporte de "ferias sin cerrar". Se decidió no
+     * modelar la consignación como entidad — ver PLAN-INVENTARIO-MARKETING.md.
+     */
+    evento: text("evento"),
+    /** Obligatorio en `ajuste_conteo` y `salida_merma`; opcional en el resto. */
+    motivo_texto: text("motivo_texto"),
+    /** Nº de factura del proveedor, acta de entrega, orden interna. */
+    documento_referencia: text("documento_referencia"),
+
+    /** Snapshot: valorar el inventario meses después no puede depender del costo de hoy. */
+    costo_unitario: numeric("costo_unitario", { precision: 10, scale: 2 }),
+
+    // ── Actor (denormalizado: el nombre sobrevive a la baja del empleado) ──
+    creado_por_id: uuid("creado_por_id").references(() => users.id),
+    creado_por_nombre: text("creado_por_nombre"),
+    creado_por_rol: text("creado_por_rol"),
+    sucursal_id: uuid("sucursal_id").references(() => sucursales.id),
+
+    fecha_creacion: timestamp("fecha_creacion", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("movimientos_inventario_articulo_fecha_idx").on(
+      t.articulo_id,
+      t.fecha_creacion.desc()
+    ),
+    // El reporte de "ferias sin cerrar" y el consumo por canal.
+    index("movimientos_inventario_evento_idx").on(t.evento).where(sql`evento IS NOT NULL`),
+    index("movimientos_inventario_motivo_fecha_idx").on(t.motivo, t.fecha_creacion),
+
+    // Un canje descuenta como máximo UNA vez. Estructural, no por lógica: ni
+    // un doble submit ni un reintento de red pueden descontar dos unidades.
+    uniqueIndex("movimientos_inventario_canje_uq")
+      .on(t.canje_id)
+      .where(sql`canje_id IS NOT NULL`),
+
+    // El signo tiene que coincidir con el prefijo del motivo. Un error de signo
+    // en un ledger sin esta regla es una entrada silenciosa que solo aparece en
+    // el conteo físico, meses después.
+    //
+    // `starts_with` y no `LIKE`: el motivo es un enum y LIKE no opera sobre
+    // enums sin cast (42883), pero sobre todo porque en LIKE el `_` es un
+    // comodín de un carácter — `'ingreso_%'` también casaría con 'ingresoX…'.
+    // `starts_with` compara prefijo literal y no tiene esa trampa.
+    check(
+      "movimientos_inventario_signo_segun_motivo",
+      sql`(starts_with(${t.motivo}::text, 'ingreso_') AND ${t.cantidad} > 0)
+       OR (starts_with(${t.motivo}::text, 'salida_')  AND ${t.cantidad} < 0)
+       OR (${t.motivo} = 'ajuste_conteo' AND ${t.cantidad} <> 0)`
+    ),
+
+    // Un ajuste o una merma sin explicación es un agujero en la auditoría.
+    check(
+      "movimientos_inventario_motivo_texto_obligatorio",
+      sql`${t.motivo} NOT IN ('ajuste_conteo', 'salida_merma')
+       OR (${t.motivo_texto} IS NOT NULL AND length(trim(${t.motivo_texto})) >= 5)`
+    ),
+  ]
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tipos inferidos
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type Usuario = typeof users.$inferSelect;
 export type Cliente = typeof clientes.$inferSelect;
+export type Vehiculo = typeof vehiculos.$inferSelect;
 export type ClienteDispositivo = typeof clienteDispositivos.$inferSelect;
 export type ServicioTipo = typeof serviciosTipo.$inferSelect;
 export type ReglaPuntos = typeof reglasPuntos.$inferSelect;
 export type Premio = typeof premios.$inferSelect;
+export type Articulo = typeof articulos.$inferSelect;
+export type MovimientoInventario = typeof movimientosInventario.$inferSelect;
+export type MotivoInventario = (typeof motivoInventarioEnum.enumValues)[number];
 export type Canje = typeof canjes.$inferSelect;
 export type PuntosTransaccion = typeof puntosTransacciones.$inferSelect;
 export type EstadoCanje = (typeof estadoCanjeEnum.enumValues)[number];

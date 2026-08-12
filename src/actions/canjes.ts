@@ -29,7 +29,7 @@
 "use server";
 
 import { db } from "@/db";
-import { canjeHistorial, canjes, clientes, premios, puntosTransacciones, users } from "@/db/schema";
+import { articulos, canjeHistorial, canjes, clientes, premios, puntosTransacciones, users } from "@/db/schema";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getSesionCliente } from "./auth-cliente";
@@ -39,16 +39,20 @@ import {
   aprobarCanjeAtomico,
   crearCanjeIdempotente,
   descartarCanjeSinCobro,
+  devolverStock,
 } from "@/lib/canje-operaciones";
 import { generarCodigoEntrega } from "@/lib/otp";
 import {
+  MOTIVOS_CANCELACION_APROBADO,
   MOTIVOS_RECHAZO,
   puedeTransicionar,
   type Actor,
+  type MotivoCancelacionAprobado,
   type MotivoRechazo,
 } from "@/lib/canje-estado";
 import { entregarCanjeSchema, solicitarCanjeSchema } from "@/lib/validations";
 import { sendEmail, getBaseUrl } from "@/lib/mail";
+import { avisarStockBajo } from "@/lib/stock-alertas.server";
 import { decryptNullableField } from "@/lib/pii-crypto";
 import { logAdminAction } from "@/lib/admin-audit";
 import type { EstadoCanje } from "@/db/schema";
@@ -99,8 +103,17 @@ export async function solicitarCanje(entrada: {
 
   // La interfaz deshabilita el botón de un premio agotado, pero la interfaz
   // nunca es la defensa: alguien puede llamar a esta acción directamente.
-  if (premio.stock !== null && premio.stock <= 0) {
-    return { ok: false, error: "Ese premio está agotado por ahora." };
+  // El stock ya no vive en `premios.stock` (deprecado): un merchandising
+  // siempre tiene `articulo_id` (lo exige el CHECK), y ahí es donde se mira.
+  if (premio.articulo_id) {
+    const [articulo] = await db
+      .select({ stock: articulos.stock_cache })
+      .from(articulos)
+      .where(eq(articulos.id, premio.articulo_id))
+      .limit(1);
+    if (!articulo || articulo.stock <= 0) {
+      return { ok: false, error: "Ese premio está agotado por ahora." };
+    }
   }
 
   if (sesion.saldo < premio.costo_puntos) {
@@ -275,8 +288,6 @@ export async function aprobarCanje(
   });
 
   await avisarCanjeAprobado(canje.id);
-
-  const { avisarStockBajo } = await import("./premios");
   await avisarStockBajo(canje.premio_id);
 
   revalidatePath("/interno/canjes");
@@ -338,6 +349,78 @@ export async function rechazarCanje(
     canjeId: canje.id,
     anterior: "solicitado",
     nuevo: "rechazado",
+    actorTipo: "usuario",
+    actorId: sesion.id,
+    actorNombre: sesion.nombre,
+    comentario: texto,
+  });
+
+  await avisarCanjeRechazado(canje.id, texto);
+
+  revalidatePath("/interno/canjes");
+  revalidatePath("/canjes");
+  return { ok: true };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Taller: cancelar un canje YA aprobado (el cliente no vino, se dañó en bodega…)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function cancelarCanjeAprobado(
+  canjeId: string,
+  motivo: MotivoCancelacionAprobado
+): Promise<{ ok: boolean; error?: string }> {
+  const sesion = await getSesionInterna();
+  if (!sesion) return { ok: false, error: "Tu sesión venció." };
+
+  const [canje] = await db.select().from(canjes).where(eq(canjes.id, canjeId)).limit(1);
+  if (!canje) return { ok: false, error: "Ese canje no existe." };
+
+  const permiso = puedeTransicionar({ tipo: "usuario", sesion }, canje, "cancelado");
+  if (!permiso.permitido) return { ok: false, error: permiso.motivo };
+
+  const texto = MOTIVOS_CANCELACION_APROBADO[motivo] ?? MOTIVOS_CANCELACION_APROBADO.otro;
+
+  // Primero devolver los puntos (ver nota de orden en la cabecera).
+  const reverso = await aplicarMovimiento({
+    clienteId: canje.cliente_id,
+    tipo: "reverso",
+    puntos: canje.costo_puntos,
+    canjeId: canje.id,
+    motivo: `Canje aprobado cancelado: ${motivo}`,
+    creadoPorId: sesion.id,
+    creadoPorNombre: sesion.nombre,
+    creadoPorRol: sesion.role,
+  });
+
+  if (!reverso.ok && reverso.motivo !== "duplicado") {
+    return { ok: false, error: "No pudimos devolver los puntos al cliente." };
+  }
+
+  const filas = await db
+    .update(canjes)
+    .set({
+      estado: "cancelado",
+      cerrado_en: new Date(),
+      cerrado_por_id: sesion.id,
+      motivo_cierre: texto,
+      fecha_actualizacion: new Date(),
+    })
+    .where(and(eq(canjes.id, canje.id), eq(canjes.estado, "aprobado")))
+    .returning({ id: canjes.id });
+
+  if (filas.length === 0) {
+    return { ok: false, error: "Este canje ya fue procesado por otro usuario." };
+  }
+
+  // El stock solo se devuelve si el cambio de estado fue realmente nuestro:
+  // si llegó aquí es porque el UPDATE de arriba capturó la fila.
+  await devolverStock(canje.premio_id);
+
+  await registrarHistorial({
+    canjeId: canje.id,
+    anterior: "aprobado",
+    nuevo: "cancelado",
     actorTipo: "usuario",
     actorId: sesion.id,
     actorNombre: sesion.nombre,
@@ -475,11 +558,12 @@ export async function listarCanjesPendientes(): Promise<CanjeInterno[]> {
       clienteId: clientes.id,
       clienteNombre: clientes.nombres,
       clienteVerificado: clientes.verificado,
-      stockActual: premios.stock,
+      stockActual: articulos.stock_cache,
     })
     .from(canjes)
     .innerJoin(clientes, eq(clientes.id, canjes.cliente_id))
     .innerJoin(premios, eq(premios.id, canjes.premio_id))
+    .leftJoin(articulos, eq(articulos.id, premios.articulo_id))
     .where(isNull(canjes.cerrado_en))
     .orderBy(desc(canjes.solicitado_en))
     .limit(100);

@@ -37,7 +37,7 @@ export default async function ReglasPage() {
   return (
     <div className="space-y-5 max-w-2xl">
       <div>
-        <h1 className="text-xl font-semibold">Reglas de puntos</h1>
+        <h1 className="t-titulo">Reglas de puntos</h1>
         <p className="text-sm text-muted-foreground">
           Define cuántos puntos vale un dólar gastado en el taller.
         </p>

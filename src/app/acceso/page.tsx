@@ -4,6 +4,7 @@
  * Application: Recompensas Taller
  */
 
+import Image from "next/image";
 import { redirect } from "next/navigation";
 import { getSesionCliente } from "@/actions/auth-cliente";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,17 +20,27 @@ export default async function AccesoPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-12">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>Recompensas Taller</CardTitle>
-          <CardDescription>
-            Acumula puntos por el mantenimiento de tu vehículo y canjéalos por premios.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <AccesoForm />
-        </CardContent>
-      </Card>
+      <div className="w-full max-w-sm space-y-6">
+        <Image
+          src="/logo-gp-horizontal.svg"
+          alt="Grupo Palacios"
+          width={170}
+          height={16}
+          className="h-6 w-auto mx-auto"
+          priority
+        />
+        <Card>
+          <CardHeader>
+            <CardTitle>Recompensas Taller</CardTitle>
+            <CardDescription>
+              Acumula puntos por el mantenimiento de tu vehículo y canjéalos por premios.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AccesoForm />
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

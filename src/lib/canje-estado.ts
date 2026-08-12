@@ -135,8 +135,20 @@ export function puedeTransicionar(
   }
 
   if (hacia === "cancelado") {
-    // Cancelar un canje ya aprobado devuelve stock a bodega: es una decisión de
-    // inventario, no de mostrador.
+    // "cancelado" tiene DOS filas válidas en la tabla: solicitado→cancelado
+    // (el cliente se arrepiente antes de que el taller reserve nada) y
+    // aprobado→cancelado (el taller deshace una reserva ya hecha). Un actor
+    // "usuario" solo puede la segunda — la primera es del cliente, más arriba.
+    // Sin este chequeo por `canje.estado`, `cancelarCanjeAprobado` podía
+    // devolver los puntos de un canje que seguía 'solicitado' (el reverso ya
+    // se aplica antes del UPDATE de estado) y dejarlo abierto para que luego
+    // se apruebe normalmente: el cliente se queda con los puntos Y el premio.
+    if (canje.estado !== "aprobado") {
+      return {
+        permitido: false,
+        motivo: "Solo el cliente puede cancelar un canje que todavía no fue aprobado.",
+      };
+    }
     if (!puedeAprobarCanje(sesion)) {
       return { permitido: false, motivo: "Solo el Jefe de Taller o el Admin cancelan un canje aprobado." };
     }
@@ -168,6 +180,18 @@ export const MOTIVOS_RECHAZO = {
 } as const;
 
 export type MotivoRechazo = keyof typeof MOTIVOS_RECHAZO;
+
+/**
+ * Motivos de cancelación de un canje YA aprobado (stock ya apartado). El
+ * mensaje también avisa que el stock vuelve a bodega, no solo los puntos.
+ */
+export const MOTIVOS_CANCELACION_APROBADO = {
+  cliente_no_retiro: "El cliente nunca retiró el premio. Te devolvimos tus puntos.",
+  producto_dañado: "El producto se dañó en bodega antes de la entrega. Te devolvimos tus puntos.",
+  otro: "Te devolvimos tus puntos.",
+} as const;
+
+export type MotivoCancelacionAprobado = keyof typeof MOTIVOS_CANCELACION_APROBADO;
 
 export function textoEstado(estado: EstadoCanje): string {
   switch (estado) {

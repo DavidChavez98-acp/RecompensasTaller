@@ -15,7 +15,8 @@
     "db:studio": "drizzle-kit studio",
     "test:ciclo-qr": "tsx --conditions=react-server scripts/prueba-ciclo-qr.ts",
     "test:canjes": "tsx --conditions=react-server scripts/prueba-canjes.ts",
-    "test:mantenimiento": "tsx --conditions=react-server scripts/prueba-mantenimiento.ts"
+    "test:mantenimiento": "tsx --conditions=react-server scripts/prueba-mantenimiento.ts",
+    "test:inventario": "tsx --conditions=react-server scripts/prueba-inventario.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

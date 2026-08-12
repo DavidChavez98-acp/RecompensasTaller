@@ -27,6 +27,7 @@ export type MovimientoPuntos = {
   servicioTipoId?: string | null;
   multiplicadorAplicado?: string | null;
   reglaId?: string | null;
+  vehiculoId?: string | null;
 
   escaneoId?: string | null;
   canjeId?: string | null;
@@ -137,6 +138,7 @@ export async function aplicarMovimiento(mov: MovimientoPuntos): Promise<Resultad
           servicio_tipo_id: mov.servicioTipoId ?? null,
           multiplicador_aplicado: mov.multiplicadorAplicado ?? null,
           regla_id: mov.reglaId ?? null,
+          vehiculo_id: mov.vehiculoId ?? null,
           escaneo_id: mov.escaneoId ?? null,
           canje_id: mov.canjeId ?? null,
           reversa_de_id: mov.reversaDeId ?? null,

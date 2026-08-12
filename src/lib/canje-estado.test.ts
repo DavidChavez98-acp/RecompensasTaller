@@ -102,19 +102,19 @@ test("no existe transición directa de solicitado a entregado", () => {
 test("Jefe de Taller y Admin aprueban; Asesor y Marketing no", () => {
   assert.equal(puedeTransicionar(usuario("Jefe de Taller"), canje("solicitado"), "aprobado").permitido, true);
   assert.equal(puedeTransicionar(usuario("Admin"), canje("solicitado"), "aprobado").permitido, true);
-  assert.equal(puedeTransicionar(usuario("Asesor"), canje("solicitado"), "aprobado").permitido, false);
-  assert.equal(puedeTransicionar(usuario("Marketing"), canje("solicitado"), "aprobado").permitido, false);
+  assert.equal(puedeTransicionar(usuario("Asesor de Servicio"), canje("solicitado"), "aprobado").permitido, false);
+  assert.equal(puedeTransicionar(usuario("Jefe de Marketing"), canje("solicitado"), "aprobado").permitido, false);
 });
 
 test("el Asesor SÍ entrega: está en el mostrador con el cliente", () => {
-  assert.equal(puedeTransicionar(usuario("Asesor"), canje("aprobado"), "entregado").permitido, true);
+  assert.equal(puedeTransicionar(usuario("Asesor de Servicio"), canje("aprobado"), "entregado").permitido, true);
   assert.equal(puedeTransicionar(usuario("Jefe de Taller"), canje("aprobado"), "entregado").permitido, true);
-  assert.equal(puedeTransicionar(usuario("Marketing"), canje("aprobado"), "entregado").permitido, false);
+  assert.equal(puedeTransicionar(usuario("Jefe de Marketing"), canje("aprobado"), "entregado").permitido, false);
 });
 
 test("segregación de funciones: un Asesor solo no cierra el ciclo", () => {
   // Este es el vector de fraude obvio: aprobarse un premio y llevárselo.
-  const asesor = usuario("Asesor");
+  const asesor = usuario("Asesor de Servicio");
   assert.equal(puedeTransicionar(asesor, canje("solicitado"), "aprobado").permitido, false);
   assert.equal(puedeTransicionar(asesor, canje("aprobado"), "entregado").permitido, true);
   assert.equal(
@@ -125,7 +125,7 @@ test("segregación de funciones: un Asesor solo no cierra el ciclo", () => {
 });
 
 test("Marketing gestiona catálogo pero no toca la cola de canjes", () => {
-  const marketing = usuario("Marketing");
+  const marketing = usuario("Jefe de Marketing");
   for (const estado of ["solicitado", "aprobado"] as EstadoCanje[]) {
     assert.deepEqual(
       transicionesDisponibles(marketing, canje(estado)),
@@ -170,8 +170,8 @@ test("de un estado terminal no sale nadie, con ningún rol", () => {
     CLIENTE,
     usuario("Admin"),
     usuario("Jefe de Taller"),
-    usuario("Asesor"),
-    usuario("Marketing"),
+    usuario("Asesor de Servicio"),
+    usuario("Jefe de Marketing"),
   ];
 
   for (const estado of ESTADOS_TERMINALES) {
@@ -190,6 +190,24 @@ test("entregado es terminal: ni el Admin puede revertirlo por aquí", () => {
   // cambio de estado silencioso.
   assert.equal(esTerminal("entregado"), true);
   assert.equal(puedeTransicionar(usuario("Admin"), canje("entregado"), "cancelado").permitido, false);
+});
+
+/**
+ * "cancelado" tiene dos filas en la tabla: solicitado→cancelado (el cliente)
+ * y aprobado→cancelado (el taller deshace una reserva). Un actor "usuario"
+ * NO puede usar la primera aunque `buscarTransicion` encuentre una fila —
+ * `cancelarCanjeAprobado` aplica el reverso de puntos ANTES del UPDATE de
+ * estado, así que si esto no se filtrara por `canje.estado`, un canje que
+ * sigue 'solicitado' se quedaría con los puntos devueltos y la solicitud
+ * intacta en la cola, lista para aprobarse igual: puntos de vuelta Y premio.
+ */
+test("un usuario NO puede cancelar un canje que todavía está 'solicitado'", () => {
+  for (const rol of ["Admin", "Jefe de Taller"] as const) {
+    const resultado = puedeTransicionar(usuario(rol), canje("solicitado"), "cancelado");
+    assert.equal(resultado.permitido, false, `${rol} pudo cancelar un canje solicitado`);
+  }
+  // El cliente sí puede, y sigue siendo la única vía para ese estado.
+  assert.equal(puedeTransicionar(CLIENTE, canje("solicitado"), "cancelado").permitido, true);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

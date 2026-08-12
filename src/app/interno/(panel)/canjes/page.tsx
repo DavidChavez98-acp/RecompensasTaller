@@ -21,7 +21,7 @@ export default async function CanjesInternoPage() {
   return (
     <div className="space-y-5 max-w-2xl">
       <div>
-        <h1 className="text-xl font-semibold">Canjes</h1>
+        <h1 className="t-titulo">Canjes</h1>
         <p className="text-sm text-muted-foreground">
           Aprueba solo lo que tengas en bodega. Al rechazar, los puntos vuelven al cliente
           automáticamente.

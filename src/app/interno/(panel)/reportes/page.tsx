@@ -63,7 +63,7 @@ export default async function ReportesPage() {
   return (
     <div className="space-y-8 max-w-4xl">
       <div>
-        <h1 className="text-xl font-semibold">Reportes</h1>
+        <h1 className="t-titulo">Reportes</h1>
         <p className="text-sm text-muted-foreground">Últimos 30 días.</p>
       </div>
 
@@ -104,7 +104,7 @@ export default async function ReportesPage() {
       {/* ── Antifraude ───────────────────────────────────────────────────── */}
       <section className="space-y-3">
         <div>
-          <h2 className="font-medium">Concentración por asesor</h2>
+          <h2 className="t-seccion text-muted-foreground">Concentración por asesor</h2>
           <p className="text-sm text-muted-foreground">
             Qué porcentaje de las acreditaciones de cada asesor va a un mismo cliente. Una
             concentración alta no prueba nada por sí sola, pero merece una mirada.
@@ -181,7 +181,7 @@ export default async function ReportesPage() {
       {topadas.length > 0 && (
         <section className="space-y-3">
           <div>
-            <h2 className="font-medium">Acreditaciones recortadas por el tope</h2>
+            <h2 className="t-seccion text-muted-foreground">Acreditaciones recortadas por el tope</h2>
             <p className="text-sm text-muted-foreground">
               Casi siempre un dedazo en el monto. El tope las recortó, pero conviene revisarlas.
             </p>
@@ -216,7 +216,7 @@ export default async function ReportesPage() {
       {sinVerificar.length > 0 && (
         <section className="space-y-3">
           <div>
-            <h2 className="font-medium">Sin verificar, con saldo</h2>
+            <h2 className="t-seccion text-muted-foreground">Sin verificar, con saldo</h2>
             <p className="text-sm text-muted-foreground">
               El auto-registro prueba el correo, no la identidad. Pídeles la cédula en su próxima
               visita.
@@ -250,7 +250,7 @@ export default async function ReportesPage() {
 
       {/* ── Actividad ────────────────────────────────────────────────────── */}
       <section className="space-y-3">
-        <h2 className="font-medium">Actividad del equipo</h2>
+        <h2 className="t-seccion text-muted-foreground">Actividad del equipo</h2>
         {topAsesores.length === 0 ? (
           <p className="text-sm text-muted-foreground">Sin actividad en el periodo.</p>
         ) : (
@@ -272,7 +272,7 @@ export default async function ReportesPage() {
       {/* ── Correcciones ─────────────────────────────────────────────────── */}
       {correcciones.length > 0 && (
         <section className="space-y-3">
-          <h2 className="font-medium">Reversos y ajustes</h2>
+          <h2 className="t-seccion text-muted-foreground">Reversos y ajustes</h2>
           <div className="space-y-2">
             {correcciones.map((fila) => (
               <Card key={fila.id}>

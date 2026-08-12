@@ -33,7 +33,7 @@ export default async function PremiosInternoPage() {
   return (
     <div className="space-y-5 max-w-2xl">
       <div>
-        <h1 className="text-xl font-semibold">Premios e inventario</h1>
+        <h1 className="t-titulo">Premios e inventario</h1>
         <p className="text-sm text-muted-foreground">
           El cliente ve los premios agotados marcados como tales, pero nunca cuántas unidades
           quedan.

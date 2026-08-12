@@ -11,11 +11,17 @@ import { useRouter } from "next/navigation";
 import { PackageX, ShieldAlert } from "lucide-react";
 import {
   aprobarCanje,
+  cancelarCanjeAprobado,
   entregarCanje,
   rechazarCanje,
   type CanjeInterno,
 } from "@/actions/canjes";
-import { MOTIVOS_RECHAZO, type MotivoRechazo } from "@/lib/canje-estado";
+import {
+  MOTIVOS_CANCELACION_APROBADO,
+  MOTIVOS_RECHAZO,
+  type MotivoCancelacionAprobado,
+  type MotivoRechazo,
+} from "@/lib/canje-estado";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -47,7 +53,7 @@ export function ColaCanjes({
   return (
     <div className="space-y-6">
       <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">
+        <h2 className="t-seccion text-muted-foreground">
           Por aprobar ({solicitados.length})
         </h2>
         {solicitados.length === 0 ? (
@@ -60,14 +66,19 @@ export function ColaCanjes({
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">
+        <h2 className="t-seccion text-muted-foreground">
           Listos para entregar ({aprobados.length})
         </h2>
         {aprobados.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nada por entregar.</p>
         ) : (
           aprobados.map((canje) => (
-            <FilaPorEntregar key={canje.id} canje={canje} puedeEntregar={puedeEntregar} />
+            <FilaPorEntregar
+              key={canje.id}
+              canje={canje}
+              puedeEntregar={puedeEntregar}
+              puedeAprobar={puedeAprobar}
+            />
           ))
         )}
       </section>
@@ -209,9 +220,18 @@ function etiquetaMotivo(motivo: MotivoRechazo): string {
   }
 }
 
-function FilaPorEntregar({ canje, puedeEntregar }: { canje: CanjeInterno; puedeEntregar: boolean }) {
+function FilaPorEntregar({
+  canje,
+  puedeEntregar,
+  puedeAprobar,
+}: {
+  canje: CanjeInterno;
+  puedeEntregar: boolean;
+  puedeAprobar: boolean;
+}) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  const [cancelando, setCancelando] = useState(false);
   const [pendiente, iniciarTransicion] = useTransition();
 
   function entregar(evento: React.FormEvent<HTMLFormElement>) {
@@ -223,6 +243,18 @@ function FilaPorEntregar({ canje, puedeEntregar }: { canje: CanjeInterno; puedeE
       const resultado = await entregarCanje({ canje_id: canje.id, codigo_entrega: codigo });
       if (!resultado.ok) {
         setError(resultado.error ?? "No se pudo entregar.");
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  function cancelar(motivo: MotivoCancelacionAprobado) {
+    setError(null);
+    iniciarTransicion(async () => {
+      const resultado = await cancelarCanjeAprobado(canje.id, motivo);
+      if (!resultado.ok) {
+        setError(resultado.error ?? "No se pudo cancelar.");
         return;
       }
       router.refresh();
@@ -254,14 +286,64 @@ function FilaPorEntregar({ canje, puedeEntregar }: { canje: CanjeInterno; puedeE
                 {pendiente ? "…" : "Entregar"}
               </Button>
             </div>
-            {error && (
-              <p role="alert" className="text-sm text-destructive">
-                {error}
-              </p>
-            )}
           </form>
         )}
+
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
+
+        {puedeAprobar &&
+          (cancelando ? (
+            <div className="space-y-2 border-t pt-3">
+              <p className="text-sm">¿Por qué se cancela este canje ya aprobado?</p>
+              <p className="text-xs text-muted-foreground">
+                Se devuelven los puntos al cliente y la unidad a bodega.
+              </p>
+              {(Object.keys(MOTIVOS_CANCELACION_APROBADO) as MotivoCancelacionAprobado[]).map(
+                (motivo) => (
+                  <Button
+                    key={motivo}
+                    variant="outline"
+                    size="sm"
+                    className="w-full justify-start"
+                    disabled={pendiente}
+                    onClick={() => cancelar(motivo)}
+                  >
+                    {etiquetaMotivoCancelacion(motivo)}
+                  </Button>
+                )
+              )}
+              <Button variant="ghost" size="sm" onClick={() => setCancelando(false)} disabled={pendiente}>
+                Volver
+              </Button>
+            </div>
+          ) : (
+            <div className="border-t pt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCancelando(true)}
+                disabled={pendiente}
+              >
+                Cancelar canje
+              </Button>
+            </div>
+          ))}
       </CardContent>
     </Card>
   );
+}
+
+function etiquetaMotivoCancelacion(motivo: MotivoCancelacionAprobado): string {
+  switch (motivo) {
+    case "cliente_no_retiro":
+      return "El cliente nunca retiró el premio";
+    case "producto_dañado":
+      return "El producto se dañó en bodega";
+    case "otro":
+      return "Otro motivo";
+  }
 }

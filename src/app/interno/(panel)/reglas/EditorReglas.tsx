@@ -18,6 +18,7 @@ import {
 import { calcularPuntos, type ReglaCalculo } from "@/lib/puntos-calculo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -106,7 +107,7 @@ function FormularioRegla({
   return (
     <section className="space-y-3">
       <div>
-        <h2 className="font-medium">Regla vigente</h2>
+        <h2 className="t-seccion text-muted-foreground">Regla vigente</h2>
         {reglaVigente ? (
           <p className="text-sm text-muted-foreground">
             {reglaVigente.puntosPorBase} punto{reglaVigente.puntosPorBase === 1 ? "" : "s"} por cada{" "}
@@ -204,7 +205,7 @@ function FormularioRegla({
                 value={redondeo}
                 onChange={(e) => setRedondeo(e.target.value)}
                 disabled={pendiente}
-                className="h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-base md:text-sm"
+                className="h-11 w-full rounded-lg border border-input bg-transparent px-3 text-base md:text-sm"
               >
                 <option value="abajo">Hacia abajo (no regala puntos)</option>
                 <option value="cercano">Al más cercano</option>
@@ -262,7 +263,7 @@ function Multiplicadores({ servicios }: { servicios: ServicioAdmin[] }) {
   return (
     <section className="space-y-3">
       <div>
-        <h2 className="font-medium">Multiplicadores por servicio</h2>
+        <h2 className="t-seccion text-muted-foreground">Multiplicadores por servicio</h2>
         <p className="text-sm text-muted-foreground">
           Cuánto pesa cada tipo de trabajo sobre la regla base.
         </p>
@@ -280,6 +281,7 @@ function Multiplicadores({ servicios }: { servicios: ServicioAdmin[] }) {
 function FilaServicio({ servicio }: { servicio: ServicioAdmin }) {
   const router = useRouter();
   const [editando, setEditando] = useState(false);
+  const [activo, setActivo] = useState(servicio.activo);
   const [error, setError] = useState<string | null>(null);
   const [pendiente, iniciarTransicion] = useTransition();
 
@@ -293,7 +295,7 @@ function FilaServicio({ servicio }: { servicio: ServicioAdmin }) {
         id: servicio.id,
         nombre: String(datos.get("nombre") ?? ""),
         multiplicador: Number(datos.get("multiplicador")),
-        activo: datos.get("activo") === "on",
+        activo,
       });
 
       if (!resultado.ok) {
@@ -358,15 +360,17 @@ function FilaServicio({ servicio }: { servicio: ServicioAdmin }) {
             </div>
           </div>
 
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              name="activo"
-              defaultChecked={servicio.activo}
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id={`activo-${servicio.id}`}
+              checked={activo}
+              onCheckedChange={(valor) => setActivo(valor === true)}
               disabled={pendiente}
             />
-            Disponible para el asesor al acreditar
-          </label>
+            <Label htmlFor={`activo-${servicio.id}`} className="text-sm font-normal">
+              Disponible para el asesor al acreditar
+            </Label>
+          </div>
 
           {error && (
             <p role="alert" className="text-sm text-destructive">
@@ -393,7 +397,7 @@ function Historial({ historial }: { historial: ReglaHistorica[] }) {
 
   return (
     <section className="space-y-3">
-      <h2 className="font-medium">Historial de reglas</h2>
+      <h2 className="t-seccion text-muted-foreground">Historial de reglas</h2>
       <p className="text-sm text-muted-foreground">
         Las acreditaciones antiguas siguen apuntando a la regla con la que se calcularon.
       </p>

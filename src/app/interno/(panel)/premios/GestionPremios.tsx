@@ -13,6 +13,7 @@ import { actualizarPremio, ajustarStock, crearPremio, type PremioAdmin } from "@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatearPuntos } from "@/lib/utils";
@@ -182,6 +183,7 @@ function FormularioStock({ premio, onCerrar }: { premio: PremioAdmin; onCerrar: 
 function FormularioPremio({ premio, onCerrar }: { premio?: PremioAdmin; onCerrar: () => void }) {
   const router = useRouter();
   const [tipo, setTipo] = useState<TipoPremio>(premio?.tipo ?? "merchandising");
+  const [activo, setActivo] = useState(premio?.activo ?? true);
   const [error, setError] = useState<string | null>(null);
   const [pendiente, iniciarTransicion] = useTransition();
 
@@ -201,7 +203,7 @@ function FormularioPremio({ premio, onCerrar }: { premio?: PremioAdmin; onCerrar
       // lo exige, y el esquema Zod lo repite para dar un mensaje entendible.
       stock: esMerchandising ? Number(datos.get("stock")) : null,
       stock_minimo_alerta: esMerchandising ? Number(datos.get("stock_minimo_alerta")) : null,
-      activo: datos.get("activo") === "on",
+      activo,
     };
 
     setError(null);
@@ -279,7 +281,7 @@ function FormularioPremio({ premio, onCerrar }: { premio?: PremioAdmin; onCerrar
               value={tipo}
               onChange={(e) => setTipo(e.target.value as TipoPremio)}
               disabled={pendiente || !!premio}
-              className="h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-base md:text-sm"
+              className="h-11 w-full rounded-lg border border-input bg-transparent px-3 text-base md:text-sm"
             >
               <option value="merchandising">Merchandising (unidades contadas)</option>
               <option value="servicio">Servicio del taller (sin límite)</option>
@@ -337,15 +339,17 @@ function FormularioPremio({ premio, onCerrar }: { premio?: PremioAdmin; onCerrar
             </div>
           )}
 
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              name="activo"
-              defaultChecked={premio?.activo ?? true}
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="activo"
+              checked={activo}
+              onCheckedChange={(valor) => setActivo(valor === true)}
               disabled={pendiente}
             />
-            Visible en el catálogo del cliente
-          </label>
+            <Label htmlFor="activo" className="text-sm font-normal">
+              Visible en el catálogo del cliente
+            </Label>
+          </div>
 
           {error && (
             <p role="alert" className="text-sm text-destructive">

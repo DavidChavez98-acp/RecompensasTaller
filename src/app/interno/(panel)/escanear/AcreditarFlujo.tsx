@@ -18,6 +18,11 @@ import {
   type ServicioOpcion,
 } from "@/actions/puntos";
 import { buscarClientes, type ClienteResumen } from "@/actions/clientes";
+import {
+  crearVehiculo,
+  listarVehiculosDeCliente,
+  type VehiculoResumen,
+} from "@/actions/vehiculos";
 import { EscanerQr } from "@/components/EscanerQr";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -43,6 +48,52 @@ export function AcreditarFlujo({ servicios }: { servicios: ServicioOpcion[] }) {
   const [pista, setPista] = useState<string | null>(null);
   const [procesando, iniciarTransicion] = useTransition();
 
+  // ── Vehículo del cliente (opcional) ──────────────────────────────────────
+  // El Jefe de Taller quiere ver "qué carro es" en el mostrador, no solo la
+  // cédula. Se carga apenas se confirma el cliente, y el asesor puede elegir
+  // uno existente o cargar uno nuevo sin salir de esta pantalla.
+  const [vehiculosCliente, setVehiculosCliente] = useState<VehiculoResumen[]>([]);
+  const [vehiculoId, setVehiculoId] = useState("");
+  const [formularioVehiculoAbierto, setFormularioVehiculoAbierto] = useState(false);
+  const [errorVehiculo, setErrorVehiculo] = useState<string | null>(null);
+  const [guardandoVehiculo, iniciarGuardadoVehiculo] = useTransition();
+
+  const clienteIdConfirmado = paso.nombre === "confirmar" ? paso.cliente.clienteId : null;
+
+  /** Se llama al confirmar cliente (escaneo o código tecleado), en vez de un
+   * efecto: así el reset de estado y la carga del vehículo son parte del
+   * mismo evento de usuario, no una reacción encadenada al cambio de `paso`. */
+  function confirmarCliente(cliente: ClienteEscaneado) {
+    setVehiculosCliente([]);
+    setVehiculoId("");
+    setFormularioVehiculoAbierto(false);
+    setErrorVehiculo(null);
+    setPaso({ nombre: "confirmar", cliente });
+    listarVehiculosDeCliente(cliente.clienteId).then(setVehiculosCliente);
+  }
+
+  function onGuardarVehiculo(evento: React.FormEvent<HTMLFormElement>) {
+    evento.preventDefault();
+    if (!clienteIdConfirmado) return;
+
+    const datos = new FormData(evento.currentTarget);
+    const chasis = String(datos.get("chasis") ?? "");
+    const placa = String(datos.get("placa") ?? "");
+
+    setErrorVehiculo(null);
+    iniciarGuardadoVehiculo(async () => {
+      const resultado = await crearVehiculo({ clienteId: clienteIdConfirmado, chasis, placa });
+      if (!resultado.ok || !resultado.vehiculoId) {
+        setErrorVehiculo(resultado.error ?? "No se pudo guardar el vehículo.");
+        return;
+      }
+      const lista = await listarVehiculosDeCliente(clienteIdConfirmado);
+      setVehiculosCliente(lista);
+      setVehiculoId(resultado.vehiculoId);
+      setFormularioVehiculoAbierto(false);
+    });
+  }
+
   function onDetectado(texto: string) {
     setError(null);
     setPista(null);
@@ -53,7 +104,7 @@ export function AcreditarFlujo({ servicios }: { servicios: ServicioOpcion[] }) {
         setPista(resultado.pista ?? null);
         return;
       }
-      setPaso({ nombre: "confirmar", cliente: resultado.cliente });
+      confirmarCliente(resultado.cliente);
     });
   }
 
@@ -74,6 +125,7 @@ export function AcreditarFlujo({ servicios }: { servicios: ServicioOpcion[] }) {
         monto,
         servicio_tipo_id: servicioId,
         documento_referencia: documento,
+        vehiculo_id: vehiculoId,
       });
 
       if (!resultado.ok) {
@@ -151,6 +203,82 @@ export function AcreditarFlujo({ servicios }: { servicios: ServicioOpcion[] }) {
         </Card>
 
         <Card>
+          <CardContent className="py-4 space-y-3">
+            <p className="text-sm font-medium">Vehículo (opcional)</p>
+
+            {vehiculosCliente.length > 0 && !formularioVehiculoAbierto && (
+              <select
+                value={vehiculoId}
+                onChange={(evento) => setVehiculoId(evento.target.value)}
+                disabled={procesando}
+                className="h-11 w-full rounded-lg border border-input bg-transparent px-3 text-base md:text-sm"
+              >
+                <option value="">Sin vehículo</option>
+                {vehiculosCliente.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {[v.marca, v.modelo, v.placa && `· ${v.placa}`].filter(Boolean).join(" ") ||
+                      v.chasis}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {!formularioVehiculoAbierto ? (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setFormularioVehiculoAbierto(true)}
+                disabled={procesando}
+              >
+                + Vehículo nuevo
+              </Button>
+            ) : (
+              <form onSubmit={onGuardarVehiculo} className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="chasis">Chasis</Label>
+                  <Input
+                    id="chasis"
+                    name="chasis"
+                    placeholder="Número de chasis"
+                    autoFocus
+                    required
+                    disabled={guardandoVehiculo}
+                    className="font-mono uppercase"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="placa">Placa (opcional)</Label>
+                  <Input id="placa" name="placa" disabled={guardandoVehiculo} />
+                </div>
+
+                {errorVehiculo && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {errorVehiculo}
+                  </p>
+                )}
+
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setFormularioVehiculoAbierto(false);
+                      setErrorVehiculo(null);
+                    }}
+                    disabled={guardandoVehiculo}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button type="submit" className="flex-1" disabled={guardandoVehiculo}>
+                    {guardandoVehiculo ? "Guardando…" : "Guardar vehículo"}
+                  </Button>
+                </div>
+              </form>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
           <CardContent className="py-4">
             <form onSubmit={onAcreditar} className="space-y-4">
               <div className="space-y-2">
@@ -179,7 +307,7 @@ export function AcreditarFlujo({ servicios }: { servicios: ServicioOpcion[] }) {
                   required
                   disabled={procesando}
                   defaultValue={servicios[0]?.id ?? ""}
-                  className="h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-base md:text-sm"
+                  className="h-11 w-full rounded-lg border border-input bg-transparent px-3 text-base md:text-sm"
                 >
                   {servicios.map((servicio) => (
                     <option key={servicio.id} value={servicio.id}>
@@ -249,7 +377,7 @@ export function AcreditarFlujo({ servicios }: { servicios: ServicioOpcion[] }) {
       )}
 
       <CodigoTecleado
-        onCliente={(cliente) => setPaso({ nombre: "confirmar", cliente })}
+        onCliente={confirmarCliente}
         onError={(mensaje) => {
           setError(mensaje);
           setPista(null);

@@ -33,7 +33,7 @@ export function CancelarCanje({ canjeId }: { canjeId: string }) {
   if (!confirmando) {
     return (
       <div className="space-y-1">
-        <Button variant="ghost" size="sm" onClick={() => setConfirmando(true)}>
+        <Button variant="ghost" onClick={() => setConfirmando(true)}>
           Cancelar solicitud
         </Button>
         {error && (
@@ -46,14 +46,17 @@ export function CancelarCanje({ canjeId }: { canjeId: string }) {
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-xs text-muted-foreground">¿Seguro? Te devolvemos los puntos.</span>
-      <Button variant="ghost" size="sm" onClick={() => setConfirmando(false)} disabled={pendiente}>
-        No
-      </Button>
-      <Button variant="destructive" size="sm" onClick={cancelar} disabled={pendiente}>
-        {pendiente ? "…" : "Sí, cancelar"}
-      </Button>
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">¿Seguro? Te devolvemos los puntos.</p>
+      {/* Sin size="sm": es una acción irreversible, no una fila densa de tabla. */}
+      <div className="flex items-center gap-2">
+        <Button variant="ghost" onClick={() => setConfirmando(false)} disabled={pendiente}>
+          No
+        </Button>
+        <Button variant="destructive" onClick={cancelar} disabled={pendiente}>
+          {pendiente ? "…" : "Sí, cancelar"}
+        </Button>
+      </div>
     </div>
   );
 }

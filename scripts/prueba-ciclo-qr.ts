@@ -87,7 +87,7 @@ async function main() {
 
     const [usuario] = await db
       .insert(users)
-      .values({ nombre: `${MARCA} Asesor`, role: "Asesor", sucursal_id: sucursal.id })
+      .values({ nombre: `${MARCA} Asesor`, role: "Asesor de Servicio", sucursal_id: sucursal.id })
       .returning({ id: users.id });
     usuarioId = usuario!.id;
 

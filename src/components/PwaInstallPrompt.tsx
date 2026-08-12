@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Download, Share, X, PlusSquare } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: Array<string>;
@@ -109,23 +110,30 @@ export function PwaInstallPrompt() {
 
   return (
     <div className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:max-w-sm z-50 animate-in fade-in slide-in-from-bottom-5 duration-300">
-      <div className="bg-card text-card-foreground border border-border rounded-xl shadow-xl p-4 relative overflow-hidden bg-white dark:bg-zinc-950">
-        {/* Top/Side Crimson accent line */}
-        <div className="absolute top-0 left-0 right-0 h-1 bg-red-600 dark:bg-rose-500" />
-        
-        <button 
+      {/*
+        Sin sombras decorativas ni colores sueltos de Tailwind: solo tokens del
+        sistema (bg-card, text-primary, border-border), igual que el resto de
+        la app. Este era el único componente que no los respetaba — heredado
+        del proyecto hermano sin adaptar.
+      */}
+      <div className="bg-card text-card-foreground border border-border rounded-xl p-4 relative overflow-hidden">
+        <div className="absolute top-0 left-0 right-0 h-1 bg-primary" />
+
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onClick={handleDismiss}
-          className="absolute top-3 right-3 text-muted-foreground hover:text-foreground transition-colors p-1 rounded-full hover:bg-muted"
+          className="absolute top-3 right-3 rounded-full"
           aria-label="Cerrar"
         >
           <X className="h-4 w-4" />
-        </button>
+        </Button>
 
         <div className="flex gap-3 items-start mt-1">
-          <div className="p-2 bg-red-50 dark:bg-red-950/30 rounded-lg text-red-600 dark:text-rose-500 shrink-0">
+          <div className="p-2 bg-primary/10 rounded-lg text-primary shrink-0">
             <Download className="h-5 w-5" />
           </div>
-          
+
           <div className="space-y-1">
             <h3 className="font-semibold text-sm leading-none tracking-tight">Instalar Aplicación</h3>
             <p className="text-xs text-muted-foreground leading-normal">
@@ -138,7 +146,7 @@ export function PwaInstallPrompt() {
           <div className="mt-4 pt-3 border-t border-border/60 text-[11px] text-muted-foreground space-y-2">
             <div className="flex items-center gap-2">
               <span className="flex h-5 w-5 items-center justify-center rounded bg-muted text-foreground font-semibold">1</span>
-              <span>Presiona el botón compartir <Share className="inline h-3.5 w-3.5 mx-0.5 text-blue-500" /> en Safari.</span>
+              <span>Presiona el botón compartir <Share className="inline h-3.5 w-3.5 mx-0.5" /> en Safari.</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="flex h-5 w-5 items-center justify-center rounded bg-muted text-foreground font-semibold">2</span>
@@ -147,18 +155,12 @@ export function PwaInstallPrompt() {
           </div>
         ) : (
           <div className="mt-4 flex gap-2 justify-end">
-            <button
-              onClick={handleDismiss}
-              className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors font-medium cursor-pointer"
-            >
+            <Button variant="ghost" size="sm" onClick={handleDismiss}>
               Quizás luego
-            </button>
-            <button
-              onClick={handleInstallClick}
-              className="text-xs bg-red-600 hover:bg-red-700 dark:bg-rose-600 dark:hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg transition-colors font-medium shadow-sm hover:shadow cursor-pointer"
-            >
+            </Button>
+            <Button size="sm" onClick={handleInstallClick}>
               Instalar ahora
-            </button>
+            </Button>
           </div>
         )}
       </div>

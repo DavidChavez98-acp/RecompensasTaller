@@ -75,6 +75,22 @@ export const telefonoSchema = z
   .trim()
   .refine(validateCellphone, { message: "Número de celular inválido" });
 
+/**
+ * Chasis (VIN). No se exige el estándar ISO 3779 completo (17 caracteres, sin
+ * I/O/Q) a propósito: vehículos anteriores a 1981 y algunas motos que pasan
+ * por el taller traen chasis más cortos, y el Jefe de Taller transcribe lo que
+ * está estampado en la carrocería, no lo que un validador estricto esperaría.
+ * Se normaliza a mayúsculas sin espacios ni guiones y se exige un mínimo que
+ * descarte errores de tecleo obvios.
+ */
+export const chasisSchema = z
+  .string()
+  .trim()
+  .transform((val) => val.toUpperCase().replace(/[\s-]/g, ""))
+  .refine((val) => /^[A-Z0-9]{5,17}$/.test(val), {
+    message: "El chasis debe tener entre 5 y 17 caracteres alfanuméricos",
+  });
+
 /** Paso 1 del login: el cliente escribe su cédula y pide el código. */
 export const solicitarOtpSchema = z.object({
   identificacion: identificacionSchema,
@@ -118,6 +134,9 @@ export const acreditarPuntosSchema = z.object({
     .max(999999.99, "Monto fuera de rango"),
   servicio_tipo_id: z.string().uuid("Selecciona el tipo de servicio"),
   documento_referencia: z.string().trim().max(60).optional().or(z.literal("")),
+  // Opcional: no todo cliente tiene un vehículo cargado todavía. El asesor
+  // puede acreditar sin él y añadirlo después.
+  vehiculo_id: z.string().uuid().optional().or(z.literal("")),
 });
 
 /** Solicitud de canje desde la PWA del cliente. */
@@ -135,7 +154,14 @@ export const entregarCanjeSchema = z.object({
     .string()
     .trim()
     .toUpperCase()
-    .regex(/^[0-9A-HJ-NP-TV-Z]{6}$/, "El código de entrega son 6 caracteres"),
+    /*
+     * Crockford-base32: sin I, L, O ni U. El rango `J-N` de la versión
+     * anterior dejaba pasar la L, que el generador NUNCA produce
+     * (`ALFABETO_CODIGO` en constants.ts). Un código con L se colaba hasta la
+     * consulta y moría con "ese código no coincide" en vez de con un error de
+     * formato. Hay que enumerar J y K sueltas para excluir la L del rango.
+     */
+    .regex(/^[0-9A-HJKMNP-TV-Z]{6}$/, "El código de entrega son 6 caracteres"),
 });
 
 /** Alta o edición de un premio del catálogo. */
@@ -165,6 +191,68 @@ export const ajustarStockSchema = z.object({
   cantidad: z.number().int().refine((n) => n !== 0, "El ajuste no puede ser cero"),
   motivo: z.string().trim().min(5, "Explica el motivo del ajuste").max(200),
 });
+
+/**
+ * Alta de un artículo de inventario de marketing SIN premio asociado — un
+ * roll-up, un tríptico, un esfero: cosas que existen en bodega y nunca son
+ * canjeables. `crearPremio` sigue siendo el camino para un merchandising que
+ * SÍ es canjeable (crea el artículo enlazado en la misma transacción).
+ */
+export const articuloSchema = z.object({
+  codigo: z.string().trim().min(2).max(40).regex(/^[A-Z0-9_-]+$/, "Solo mayúsculas, números, guion y guion bajo"),
+  nombre: z.string().trim().min(3).max(120),
+  descripcion: z.string().trim().max(500).optional().or(z.literal("")),
+  unidad: z.string().trim().min(1).max(30).optional().or(z.literal("")),
+  stock_minimo_alerta: z.number().int().min(0).nullable(),
+});
+
+/**
+ * Ingreso de mercadería: siempre positivo. Dos motivos posibles:
+ * `ingreso_compra` (recepción del proveedor, con factura opcional) o
+ * `ingreso_devolucion` (lo que volvió de una feria, con el MISMO texto de
+ * `evento` que llevó la `salida_evento` original — es lo que enlaza las dos
+ * filas y permite detectar una feria sin cerrar).
+ */
+export const ingresoInventarioSchema = z
+  .object({
+    articulo_id: z.string().uuid(),
+    motivo: z.enum(["ingreso_compra", "ingreso_devolucion"]).default("ingreso_compra"),
+    cantidad: z.number().int().positive("La cantidad debe ser mayor a cero"),
+    costo_unitario: z.number().nonnegative().optional(),
+    documento_referencia: z.string().trim().max(60).optional().or(z.literal("")),
+    evento: z.string().trim().max(120).optional().or(z.literal("")),
+  })
+  .refine((i) => i.motivo !== "ingreso_devolucion" || i.evento, {
+    message: "Escribe el nombre de la feria o el evento que devuelve esto",
+    path: ["evento"],
+  });
+
+/**
+ * Salida de inventario: feria, entrega de vehículo, merma o uso interno.
+ * `salida_canje` NO está aquí a propósito — esa la dispara `aprobarCanjeAtomico`
+ * por su cuenta, nunca este formulario.
+ */
+export const salidaInventarioSchema = z
+  .object({
+    articulo_id: z.string().uuid(),
+    motivo: z.enum(["salida_entrega_vehiculo", "salida_evento", "salida_merma", "salida_interna"]),
+    cantidad: z.number().int().positive("La cantidad debe ser mayor a cero"),
+    evento: z.string().trim().max(120).optional().or(z.literal("")),
+    vehiculo_id: z.string().uuid().optional().or(z.literal("")),
+    motivo_texto: z.string().trim().max(300).optional().or(z.literal("")),
+  })
+  .refine((s) => s.motivo !== "salida_evento" || s.evento, {
+    message: "Escribe el nombre de la feria o el evento",
+    path: ["evento"],
+  })
+  .refine((s) => s.motivo !== "salida_entrega_vehiculo" || s.vehiculo_id, {
+    message: "Busca el vehículo por chasis",
+    path: ["vehiculo_id"],
+  })
+  .refine(
+    (s) => s.motivo !== "salida_merma" || (s.motivo_texto && s.motivo_texto.trim().length >= 5),
+    { message: "Explica qué pasó (mínimo 5 caracteres)", path: ["motivo_texto"] }
+  );
 
 /** Regla de puntos: se inserta una fila nueva, nunca se hace UPDATE. */
 export const reglaPuntosSchema = z.object({

@@ -16,7 +16,7 @@ export default async function QrPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold">Mi código</h1>
+        <h1 className="t-titulo">Mi código</h1>
         <p className="text-sm text-muted-foreground">
           Muéstraselo al asesor para que acredite tus puntos.
         </p>

@@ -17,6 +17,7 @@ import "server-only";
 import { db } from "@/db";
 import { canjes, premios } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
+import { aplicarMovimientoInventario, aplicarMovimientoInventarioEnTx } from "./inventario";
 
 /**
  * Crea la fila del canje, o recupera la existente si esta clave de idempotencia
@@ -87,9 +88,14 @@ export type ResultadoAprobacion =
  *
  *  1. `WHERE estado = 'solicitado'` — dos jefes aprobando a la vez producen
  *     exactamente un cambio; el segundo recibe 0 filas.
- *  2. `WHERE stock > 0` — Postgres reevalúa la condición contra la versión
+ *  2. El `UPDATE` condicional de `aplicarMovimientoInventarioEnTx` sobre el
+ *     ARTÍCULO enlazado — Postgres reevalúa la condición contra la versión
  *     nueva de la fila al desbloquearse (EvalPlanQual), así que dos
  *     aprobaciones simultáneas de la ÚLTIMA unidad no pueden pasar las dos.
+ *
+ * El stock ya NO vive en `premios.stock` (deprecado, ver AGENTS.md): vive en
+ * `articulos.stock_cache`, y el descuento se hace con la MISMA función que
+ * usa cualquier otra salida de inventario — no una reimplementación aquí.
  *
  * Si la segunda falla, la primera se revierte: no queda un canje aprobado sin
  * inventario apartado.
@@ -116,24 +122,34 @@ export async function aprobarCanjeAtomico(params: {
 
       if (aprobados.length === 0) throw new Error("YA_PROCESADO");
 
-      const conStock = await tx
-        .update(premios)
-        .set({ stock: sql`${premios.stock} - 1`, fecha_actualizacion: new Date() })
-        .where(
-          and(
-            eq(premios.id, params.premioId),
-            sql`(${premios.stock} IS NULL OR ${premios.stock} > 0)`
-          )
-        )
-        .returning({ stock: premios.stock });
+      const [premio] = await tx
+        .select({ tipo: premios.tipo, articuloId: premios.articulo_id })
+        .from(premios)
+        .where(eq(premios.id, params.premioId))
+        .limit(1);
 
-      const fila = conStock[0];
-      if (!fila) throw new Error("SIN_STOCK");
+      // Un servicio (sin artículo enlazado) no se agota nunca: nada que reservar.
+      if (!premio?.articuloId) {
+        return {
+          ok: true as const,
+          codigoEntrega: params.codigoEntrega,
+          stockRestante: null,
+        };
+      }
+
+      const movimiento = await aplicarMovimientoInventarioEnTx(tx, {
+        articuloId: premio.articuloId,
+        motivo: "salida_canje",
+        cantidad: -1,
+        canjeId: params.canjeId,
+      });
+
+      if (!movimiento.ok) throw new Error("SIN_STOCK");
 
       return {
         ok: true as const,
         codigoEntrega: params.codigoEntrega,
-        stockRestante: fila.stock,
+        stockRestante: movimiento.stockPosterior,
       };
     });
   } catch (error) {
@@ -147,10 +163,26 @@ export async function aprobarCanjeAtomico(params: {
 /**
  * Devuelve la unidad al catálogo. Solo se llama al cancelar un canje YA
  * aprobado: en los demás casos nunca se reservó nada.
+ *
+ * Motivo `ingreso_devolucion` y no `ajuste_conteo`: esto no es una corrección
+ * de conteo, es exactamente la unidad que `aprobarCanjeAtomico` reservó,
+ * volviendo porque el canje no se completó.
  */
 export async function devolverStock(premioId: string): Promise<void> {
-  await db
-    .update(premios)
-    .set({ stock: sql`${premios.stock} + 1`, fecha_actualizacion: new Date() })
-    .where(and(eq(premios.id, premioId), sql`${premios.stock} IS NOT NULL`));
+  const [premio] = await db
+    .select({ articuloId: premios.articulo_id })
+    .from(premios)
+    .where(eq(premios.id, premioId))
+    .limit(1);
+
+  if (!premio?.articuloId) return; // servicio: nunca se reservó nada que devolver
+
+  // Transacción propia (no anidada): esta escritura no comparte atomicidad con
+  // ninguna otra en el llamador actual, así que usa el wrapper público — el
+  // mismo que abre `db.transaction()` de verdad, no el núcleo sin transacción.
+  await aplicarMovimientoInventario({
+    articuloId: premio.articuloId,
+    motivo: "ingreso_devolucion",
+    cantidad: 1,
+  });
 }

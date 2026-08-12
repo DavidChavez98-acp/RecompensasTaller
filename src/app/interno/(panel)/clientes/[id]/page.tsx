@@ -10,10 +10,12 @@ import { ShieldAlert } from "lucide-react";
 import { getSesionInterna } from "@/actions/auth-interno";
 import { puedeRevertirPuntos } from "@/lib/authz";
 import { getClienteDetalle, getMovimientosCliente } from "@/actions/clientes";
+import { listarVehiculosDeCliente } from "@/actions/vehiculos";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatearFecha, formatearPuntos } from "@/lib/utils";
 import { AjustarPuntos, BotonVerificar, HistorialCliente } from "./AccionesCliente";
+import { VehiculosCliente } from "./VehiculosCliente";
 
 export const metadata = { title: "Cliente | Recompensas Taller" };
 
@@ -26,9 +28,10 @@ export default async function ClienteDetallePage({
   if (!sesion) redirect("/interno/login");
 
   const { id } = await params;
-  const [cliente, movimientos] = await Promise.all([
+  const [cliente, movimientos, vehiculos] = await Promise.all([
     getClienteDetalle(id),
     getMovimientosCliente(id),
+    listarVehiculosDeCliente(id),
   ]);
 
   if (!cliente) notFound();
@@ -44,7 +47,7 @@ export default async function ClienteDetallePage({
 
       <div>
         <div className="flex items-center gap-2 flex-wrap">
-          <h1 className="text-xl font-semibold">{cliente.nombres}</h1>
+          <h1 className="t-titulo">{cliente.nombres}</h1>
           {cliente.verificado ? (
             <Badge variant="outline">Verificado</Badge>
           ) : (
@@ -90,7 +93,12 @@ export default async function ClienteDetallePage({
       )}
 
       <section className="space-y-3">
-        <h2 className="font-medium">Historial de puntos</h2>
+        <h2 className="t-seccion text-muted-foreground">Vehículos</h2>
+        <VehiculosCliente clienteId={cliente.id} vehiculos={vehiculos} />
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="t-seccion text-muted-foreground">Historial de puntos</h2>
         <HistorialCliente
           movimientos={movimientos}
           puedeRevertir={puedeRevertirPuntos(sesion)}

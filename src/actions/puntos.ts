@@ -26,6 +26,7 @@ import {
   reglasPuntos,
   serviciosTipo,
   users,
+  vehiculos,
 } from "@/db/schema";
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { SignJWT, jwtVerify } from "jose";
@@ -288,6 +289,7 @@ export async function acreditarPuntos(entrada: {
   monto: number;
   servicio_tipo_id: string;
   documento_referencia?: string;
+  vehiculo_id?: string;
 }): Promise<ResultadoAcreditacion> {
   const sesion = await getSesionInterna();
   if (!sesion) return { ok: false, error: "Tu sesión venció. Vuelve a entrar." };
@@ -345,6 +347,21 @@ export async function acreditarPuntos(entrada: {
     }
   }
 
+  // El vehículo es opcional: no todo cliente lo tiene cargado todavía. Si
+  // viene, se comprueba que pertenezca a este cliente — el `select` del
+  // formulario ya lo restringe, pero un POST manual no debe poder colgar la
+  // acreditación de un vehículo ajeno.
+  let vehiculoId: string | null = null;
+  if (datos.vehiculo_id) {
+    const [vehiculo] = await db
+      .select({ id: vehiculos.id })
+      .from(vehiculos)
+      .where(and(eq(vehiculos.id, datos.vehiculo_id), eq(vehiculos.cliente_id, ticket.clienteId)))
+      .limit(1);
+    if (!vehiculo) return { ok: false, error: "Ese vehículo no pertenece a este cliente." };
+    vehiculoId = vehiculo.id;
+  }
+
   const regla = reglaDesdeFila(reglaFila);
   const multiplicador = Number(servicio.multiplicador);
   const calculo = calcularPuntos(datos.monto, regla, multiplicador);
@@ -377,6 +394,7 @@ export async function acreditarPuntos(entrada: {
     servicioTipoId: servicio.id,
     multiplicadorAplicado: servicio.multiplicador,
     reglaId: reglaFila.id,
+    vehiculoId,
     // El UNIQUE parcial sobre escaneo_id es lo que impide que un doble clic o
     // un reintento de red acredite dos veces. No es lógica de aplicación.
     escaneoId: ticket.escaneoId,

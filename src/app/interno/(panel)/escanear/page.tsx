@@ -50,7 +50,7 @@ export default async function EscanearPage() {
     <div className="grid gap-6 lg:grid-cols-[minmax(0,420px)_1fr]">
       <div className="space-y-4">
         <div>
-          <h1 className="text-xl font-semibold">Escanear cliente</h1>
+          <h1 className="t-titulo">Escanear cliente</h1>
           <p className="text-sm text-muted-foreground">
             {/* "acreditación" pierde la tilde en plural: acreditaciones. */}
             Hoy llevas {resumen.acreditaciones}{" "}
@@ -63,7 +63,7 @@ export default async function EscanearPage() {
       </div>
 
       <div className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Tus últimas acreditaciones</h2>
+        <h2 className="t-seccion text-muted-foreground">Tus últimas acreditaciones</h2>
 
         {recientes.length === 0 ? (
           <Card>

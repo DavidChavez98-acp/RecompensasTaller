@@ -50,6 +50,7 @@ pnpm test:concurrencia # escrituras simultáneas contra Postgres REAL
 pnpm test:ciclo-qr    # ciclo del QR con el secreto cifrado en la base
 pnpm test:canjes      # doble gasto y carrera por la última unidad de stock
 pnpm test:mantenimiento # poda, throttle global y detección de deriva del saldo
+pnpm test:inventario  # carrera por la última unidad entre canje y entrega de vehículo
 ```
 
 Las dos últimas necesitan base de datos y `--conditions=react-server` (por
@@ -83,8 +84,12 @@ dropdb recompensas_taller && createdb recompensas_taller && pnpm db:migrate && p
 ```
 
 Cuentas sembradas en desarrollo: `admin@grupopalacios.com.ec` / `Taller2026`
-(Admin) y `asesor@grupopalacios.com.ec` / `Asesor2026` (Asesor, creado a mano
-para probar el filtro por rol).
+(Admin, único creado por `pnpm db:seed`). Las demás se crean a mano para
+probar el filtro por rol — `asesor@grupopalacios.com.ec` / `Asesor2026`
+(Asesor de Servicio), `jefe@grupopalacios.com.ec` / `TallerJefe2026` (Jefe de
+Taller), `marketing@grupopalacios.com.ec` / `Marketing2026` (Jefe de
+Marketing) y `comercial@grupopalacios.com.ec` / `Comercial2026` (Asesor
+Comercial).
 
 ---
 
@@ -163,7 +168,7 @@ siempre tiene stock y alguien debe confirmarlo contra bodega.
 
 - Los **puntos se debitan al solicitar** (evita sobregiro con varios canjes en cola).
 - El **stock se reserva al aprobar** (el número del sistema nunca miente).
-- Quien aprueba **no** es quien entrega: el Asesor entrega con `codigo_entrega`.
+- Quien aprueba **no** es quien entrega: el Asesor de Servicio entrega con `codigo_entrega`.
 
 Consecuencia asumida: si queda una gorra y dos clientes la piden, ambos pagan
 puntos, uno se aprueba y al otro se le devuelven automáticamente. El mensaje de
@@ -236,6 +241,20 @@ desde el navegador con los argumentos que sea. `obtenerSecretoDispositivo` vivi�
 un rato en `src/actions/dispositivos.ts` y eso habría permitido a cualquiera
 pedir el secreto de un dispositivo ajeno y forjar sus códigos QR.
 
+Mismo bug, segunda vez: `createPasswordSetupToken` vivió en `auth-interno.ts`
+sin consumidor todavía (esperando el hito "Usuarios"), pero ya era invocable
+sin sesión — cualquiera podía pedir un JWT de 48h para tomar cualquier cuenta.
+Una auditoría de seguridad lo encontró antes de que alguien conectara el
+consumidor. Ahora vive en `src/lib/password-setup.server.ts`.
+
+Tercera vez: `avisarStockBajo` vivía en `premios.ts` sin comprobar sesión —
+solo mandaba un correo, pero cualquiera podía invocarla directo con el id de
+un premio agotado y spamear a todo Admin cuantas veces quisiera. Ahora vive en
+`src/lib/stock-alertas.server.ts`. Ninguna de las tres veces fue una función
+que alguien olvidó proteger a propósito: fue la costumbre de escribir un
+helper reutilizable dentro del mismo archivo "use server" que ya estaba
+abierto, sin pensar que ESE archivo entero es superficie pública.
+
 Lo que no deba ser invocable va en un módulo normal con `import "server-only"`
 (ver `src/lib/qr-token.server.ts` y `src/lib/saldo.ts`).
 
@@ -264,6 +283,112 @@ cuenta al predicado que le corresponda (`puedeAprobarCanje`, `puedeGestionarPrem
 Hoy no hay agujero porque esas páginas todavía no existen. En el momento en que
 se cree la primera, la comprobación va dentro, no en el menú.
 
+### Cinco roles, dos dominios que no se cruzan
+
+`Asesor` se renombró a **Asesor de Servicio** y `Marketing` a **Jefe de
+Marketing** (`ALTER TYPE ... RENAME VALUE`, no destructivo: las filas
+existentes se leen con el nombre nuevo sin tocar datos). Se sumó **Asesor
+Comercial**. Decisión explícita del dueño del producto, no una limpieza de
+nombres: taller y marketing son mundos separados.
+
+- **Taller** (Jefe de Taller, Asesor de Servicio): puntos, canjes, clientes.
+  `puedeAcreditarPuntos`, `puedeAprobarCanje`, `puedeEntregarCanje`,
+  `puedeRevertirPuntos`, `puedeVerReportes`.
+- **Marketing** (Jefe de Marketing, Asesor Comercial): inventario.
+  `puedeGestionarPremios`, `puedeGestionarInventario`,
+  `puedeRegistrarSalidaInventario`.
+
+El taller **no** tiene ninguno de los tres predicados de marketing — ni para
+consultar stock. "Esta parte no debería estar tan dirigida a talleres porque
+la manejaría directamente marketing, que es lo que sabe lo que tiene
+físicamente" — cita textual del dueño. El único punto de contacto entre los
+dos dominios es `aprobarCanjeAtomico`, que descuenta el artículo por su cuenta
+sin que el Jefe de Taller necesite ningún permiso de inventario.
+
+`puedeGestionarInventario` (alta de artículos, ingresos, ajustes) y
+`puedeRegistrarSalidaInventario` (solo salidas: entrega de vehículo, feria)
+son predicados DISTINTOS aunque hoy los tenga el mismo rol (Jefe de
+Marketing) además de Admin: el Asesor Comercial solo tiene el segundo,
+angosto a propósito — puede sacar mercadería y dejar constancia de por qué,
+pero no dar de alta artículos ni tocar el resto del inventario.
+
+`/interno/inventario` (`src/actions/inventario.ts`) es la pantalla que usa
+esos dos predicados. Distinto de `crearPremio` (en `premios.ts`): ese sigue
+siendo el camino para un merchandising CANJEABLE, que crea su artículo
+enlazado en la misma transacción. `crearArticulo` aquí es para lo que nunca
+es canjeable — un roll-up, un tríptico — artículo sin premio. La salida por
+`salida_entrega_vehiculo` revalida el `vehiculo_id` contra la base aunque
+venga de buscar por chasis en la misma pantalla: un id inventado no debe
+poder colarse en el ledger como si fuera una entrega real.
+
+### Vehículos: el chasis es la segunda identidad
+
+El Jefe de Taller no busca por cédula, busca por carro. `vehiculos` cuelga de
+`clientes` (varios por cliente) y el chasis es único. **No va cifrado**, a
+diferencia de cédula/email/teléfono: no es PII de la persona, es un dato del
+vehículo, y cifrarlo impediría la búsqueda exacta que el mostrador necesita.
+
+El historial "qué se le hizo a este chasis" **no es una tabla nueva**: es
+`puntos_transacciones.vehiculo_id`, nullable, sobre el ledger que ya existía.
+Lo que se acredita ahí —servicio, monto, fecha, puntos— ya era exactamente lo
+que hacía falta, agrupado por auto en vez de por cliente.
+
+El chasis se normaliza a mayúsculas sin espacios ni guiones (`chasisSchema`).
+No se exige el VIN de 17 caracteres de la ISO 3779: por el taller pasan motos
+y vehículos anteriores a 1981 con chasis más cortos.
+
+### El inventario de marketing es el gemelo del ledger de puntos
+
+Si el programa de fidelización es un **pasivo**, el inventario de marketing es
+un **activo**, y necesita las mismas garantías. Por eso `articulos` +
+`movimientos_inventario` replican exactamente `clientes` + `puntos_transacciones`:
+ledger append-only con trigger, `cantidad` con signo, `stock_cache`
+denormalizado, `stock_posterior` del `RETURNING`, y el mismo `UPDATE`
+condicional para la concurrencia. Ver `PLAN-INVENTARIO-MARKETING.md`.
+
+**`premios.stock` está deprecado y ya NO se escribe en ningún camino de
+producción.** El stock pertenece al ARTÍCULO, no al premio: la misma gorra
+sale por canje, por entrega de vehículo, por feria y por merma. Un premio es
+una oferta del catálogo; un artículo es una cosa en bodega. Un roll-up es
+artículo y nunca premio.
+
+El backfill (`drizzle/0005_backfill_articulos.sql`) ya corrió: cada
+merchandising existente tiene su artículo gemelo, con un `ajuste_conteo`
+inicial que explica de dónde salió el stock. El CHECK
+`premios_articulo_segun_tipo` reemplazó al viejo `premios_stock_segun_tipo` —
+un merchandising SIEMPRE tiene `articulo_id`, nunca `stock`. La columna
+`stock` sobrevive solo hasta que se verifique en producción; el `DROP COLUMN`
+va en una migración aparte.
+
+`crearPremio` crea el artículo enlazado en la MISMA transacción que el premio
+(un merchandising sin artículo violaría el CHECK al instante). `actualizarPremio`
+rechaza cambiar `tipo` después de creado — el formulario ya lo deshabilita,
+pero la Server Action lo vuelve a comprobar, porque el formulario nunca es la
+defensa. `ajustarStock` y `avisarStockBajo` leen y escriben el artículo, no
+`premios.stock`.
+
+**Patrón para escrituras que comparten atomicidad con otra tabla**:
+`aplicarMovimientoInventario` (en `src/lib/inventario.ts`) abre su propia
+transacción, pero `aplicarMovimientoInventarioEnTx` es el mismo núcleo SIN
+transacción propia, para poder anidarlo dentro de la transacción de otra
+operación. `aprobarCanjeAtomico` (en `canje-operaciones.ts`) lo usa así: el
+cambio de estado del canje y el descuento del artículo tienen que ser todo o
+nada, y Postgres no da esa garantía si `db.transaction()` se anida dentro de
+otro `db.transaction()` sin `SAVEPOINT` explícito. Cuando una escritura NO
+comparte atomicidad con nada más (`devolverStock`, un ingreso de mercadería),
+se usa el wrapper público, no el núcleo con `db` pasado como si fuera un `tx`.
+
+Dos CHECK que no son decorativos:
+
+- **El signo debe coincidir con el prefijo del motivo** (`ingreso_*` positivo,
+  `salida_*` negativo, `ajuste_conteo` cualquiera menos cero). Sin esta regla un
+  error de signo es una entrada silenciosa que solo aparece en el conteo físico,
+  meses después.
+- Se usa `starts_with(motivo::text, …)` y **no `LIKE`**: `motivo` es un enum y
+  `LIKE` no opera sobre enums sin cast (42883), pero sobre todo porque en `LIKE`
+  el `_` es comodín de un carácter y `'ingreso_%'` casaría también con
+  `'ingresoX…'`.
+
 ### Campos declarados que v1 no usa
 
 `sucursal_id`, `nivel_id`, `expira_en`, `secuencia` y el valor `'expiracion'`
@@ -271,6 +396,50 @@ del enum existen desde el día 1. Multi-sucursal, niveles y caducidad están fue
 del alcance de v1, pero encenderlos debe ser insertar filas y escribir un job.
 `ALTER TYPE ... ADD VALUE` a posteriori además tiene restricciones de
 transacción molestas.
+
+### Los activos de marca, y qué es cada archivo
+
+El isotipo de Grupo Palacios **es un velocímetro**: disco negro, sector rojo
+arriba, aguja, sobre un zócalo de tablero. No es un escudo ni un monograma. Es
+un gráfico que MIDE, y esta app existe para mostrar una medida — de ahí que el
+avance hacia el siguiente premio se dibuje y no solo se escriba.
+
+| Archivo | Qué es | Dónde va |
+|---|---|---|
+| `logo-gp-isotipo.svg` | El instrumento solo | Favicon, estados vacíos, centro del QR |
+| `logo-gp-horizontal.svg` | Lockup horizontal, para fondo claro | Cabecera de la PWA, pantallas de acceso |
+| `logo-gp-horizontal-blanco.svg` | Igual pero blanco, **conservando el rojo** | Cabecera oscura del panel interno |
+| `logo-gp-vertical.svg` | Lockup apilado: instrumento + logotipo | Marca grande. **Nunca de favicon**: a 16px el logotipo es una mancha |
+
+El logotipo son CONTORNOS, no texto, y su tipografía **no es IBM Plex**.
+Componer "Grupo Palacios" con la fuente del sistema produce el logo de otra
+empresa. El tagline "desde 1978" sí se puede poner como línea aparte en IBM
+Plex (11px, versalitas, `tracking: 0.14em`, apagado, **nunca en rojo**): un
+tagline en otra tipografía es normal, un logotipo en otra tipografía está roto.
+
+Falta pedir al diseñador: el lockup vertical **con** el tagline.
+
+### La escala tipográfica es la identidad disponible
+
+Sin gradientes, sin sombras y con el rojo restringido a marca / acción / crítico,
+la tipografía es casi lo único que queda para no parecer shadcn por defecto.
+Las utilidades `.t-*` de `globals.css` son el sistema; `.t-seccion` (versalitas)
+es la que más rinde. **Un `<h2>` nunca debe ser más pequeño ni más pálido que el
+cuerpo que encabeza** — lo fue durante seis hitos.
+
+Regla del dato numérico: la unidad siempre un escalón por debajo de la cifra y
+apagada ("1.250" grande + "pts" pequeño). El subrayado rojo de 2px marca la cifra
+protagonista, **una por pantalla**.
+
+### "No hay nada dinámico" casi nunca significa animaciones
+
+Cuando el dueño lo dijo, la app ya tenía microinteracción razonable (la cuenta
+atrás del QR, transiciones de 200ms). Lo que faltaba eran DATOS: el panel
+interno no ejecutaba ni una consulta mientras `getResumenGeneral()` calculaba
+ocho métricas encerradas tras `puedeVerReportes`, y el home del cliente mostraba
+un número que solo cambia tres veces al año.
+
+Antes de añadir movimiento, comprobar que la pantalla tiene algo que mostrar.
 
 ---
 
@@ -284,4 +453,5 @@ transacción molestas.
 | 4 · Configuración (reglas versionadas, multiplicadores) | **Hecho** |
 | 5 · Canjes e inventario | **Hecho** |
 | 6 · Control (reportes, antifraude, recálculo nocturno) | **Hecho** |
-| 7 · LOPDP + PWA (cuenta, offline, manifest, iconos) | Pendiente |
+| 7 · Inventario de marketing (artículos, ledger, salidas, reportes) | **Hecho** |
+| 8 · LOPDP + PWA (cuenta, offline, iconos) | Pendiente |

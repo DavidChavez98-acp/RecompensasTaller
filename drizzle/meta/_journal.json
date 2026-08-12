@@ -15,6 +15,41 @@
       "when": 1786046872294,
       "tag": "0001_ledger_append_only",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786233151478,
+      "tag": "0002_cheerful_demogoblin",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786234875848,
+      "tag": "0003_charming_speed",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786234875849,
+      "tag": "0004_inventario_append_only",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786234875850,
+      "tag": "0005_backfill_articulos",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786300000000,
+      "tag": "0006_roles_taller_marketing",
+      "breakpoints": true
     }
   ]
 }

@@ -22,7 +22,7 @@ export default async function PremiosPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold">Premios</h1>
+        <h1 className="t-titulo">Premios</h1>
         <p className="text-sm text-muted-foreground">
           Tienes {formatearPuntos(sesion.saldo)} puntos.
         </p>
@@ -42,7 +42,7 @@ export default async function PremiosPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h2 className="font-medium">{premio.nombre}</h2>
+                      <h2 className="t-seccion text-muted-foreground">{premio.nombre}</h2>
                       {/*
                         Un premio agotado se sigue viendo: quien esté ahorrando
                         para él necesita saber que existe. Lo que NUNCA se

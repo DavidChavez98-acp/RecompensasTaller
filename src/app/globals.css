@@ -73,12 +73,20 @@
   --primary-foreground: #FFFFFF;
   --secondary: #EBEEF2;
   --secondary-foreground: #1A2233;
-  --muted: #FAFBFC;
+  /* Antes #FAFBFC, que es MÁS CLARO que --background (#F4F5F7). Como
+     `hover:bg-muted` es el hover de los botones outline y ghost, pasar el dedo
+     ACLARABA el botón en vez de oscurecerlo y la respuesta era casi
+     imperceptible: la app respondía bien y no lo parecía. En modo oscuro sí
+     debe ser más claro que el fondo, y ahí ya lo era. */
+  --muted: #EBEEF2;
   --muted-foreground: #5A6474;
   --accent: #EBEEF2;
   --accent-foreground: #1A2233;
   --destructive: #B42318;
-  --border: #E1E5EA;
+  /* Antes #E1E5EA (1.16:1 contra el fondo): casi invisible como separador de
+     tarjetas con luz de taller o sol entrando. Reutiliza el valor de --input,
+     que ya existía para el mismo propósito. */
+  --border: #C9CFD8;
   --input: #C9CFD8;
   --ring: #C81E1E;
   --success: #0F6B45;
@@ -115,7 +123,10 @@
   --muted-foreground: #8B95A3;
   --accent: #232A33;
   --accent-foreground: #E8EAED;
-  --destructive: #E5484D;
+  /* Antes #E5484D: 4.42:1 contra --card, bajo el umbral AA de 4.5:1 para
+     texto normal. Se usa en mensajes de error (role="alert") en todos los
+     formularios. */
+  --destructive: #EC5158;
   --border: #2A3037;
   --input: #3A424D;
   --ring: #C81E1E;
@@ -166,5 +177,102 @@
   .qr-lienzo {
     background: #FFFFFF;
     color: #000000;
+  }
+
+  /* ───────────────────────────────────────────────────────────────────────
+   * Escala tipográfica
+   *
+   * Antes de esto la app tenía DOS pesos y ningún titular distinguible del
+   * cuerpo: 14 de 16 <h1> eran literalmente `text-xl font-semibold` y 11 de
+   * 20 <h2> eran `font-medium` — en la cola de canjes el <h2> era más pequeño
+   * y más pálido que las tarjetas que encabezaba. Eso no es sobriedad, es
+   * ausencia de decisión: cualquier competidor tenía lo mismo por defecto.
+   *
+   * La restricción de marca (sin gradientes, sin sombras, rojo solo en marca /
+   * acción / crítico) deja la tipografía como la principal herramienta de
+   * identidad disponible. Es la misma salida que usan los sistemas sobrios
+   * que sí se reconocen.
+   * ─────────────────────────────────────────────────────────────────────── */
+
+  /* Cifra protagonista: saldo del cliente, puntos recién acreditados. */
+  .t-dato-hero {
+    font-size: 3.5rem;
+    line-height: 1;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .t-dato-xl {
+    font-size: 2.5rem;
+    line-height: 2.75rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Métricas del panel. */
+  .t-dato {
+    font-size: 1.75rem;
+    line-height: 2rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .t-titulo {
+    font-size: 1.375rem;
+    line-height: 1.75rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  /*
+   * El cambio de mayor rendimiento del sistema: separa bloques sin añadir
+   * color ni cajas, que es exactamente lo que la restricción de marca deja
+   * disponible. Convierte un muro de tarjetas en un documento estructurado.
+   */
+  .t-seccion {
+    font-size: 0.8125rem;
+    line-height: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  /* Rótulo de un dato ("Pasivo en puntos"), siempre sobre la cifra. */
+  .t-etiqueta {
+    font-size: 0.6875rem;
+    line-height: 0.875rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .t-micro {
+    font-size: 0.75rem;
+    line-height: 1rem;
+    font-weight: 400;
+  }
+
+  /*
+   * Todo IDENTIFICADOR va en monoespaciada: cédula, chasis, placa, código de
+   * entrega, nº de orden. Es funcional —desambigua 0/O y 1/l/I al teclear con
+   * guantes— y de paso es una firma visual gratis.
+   */
+  .t-codigo {
+    font-family: var(--font-mono);
+    font-weight: 500;
+    letter-spacing: 0.05em;
+  }
+
+  /*
+   * Regla institucional de 2px. El patrón ya existía inventado y usado UNA
+   * vez, en el aviso de instalación de la PWA; aquí se promueve a elemento de
+   * sistema. Da presencia de marca constante sin un píxel de relleno rojo,
+   * sin gradiente y sin sombra.
+   */
+  .regla-marca {
+    border-top: 2px solid var(--primary);
   }
 }

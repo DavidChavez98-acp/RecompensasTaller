@@ -210,30 +210,17 @@ export async function getSesionInterna(): Promise<SesionInterna | null> {
   }
 }
 
-/**
- * Token de un solo propósito para que un usuario recién creado defina su
- * contraseña por correo. Firmado con la misma clave pero con `purpose` propio:
- * nunca se acepta como cookie de sesión ni viceversa.
+/*
+ * OJO: no reintroduzcas aquí `createPasswordSetupToken` /
+ * `verifyPasswordSetupToken`.
+ *
+ * Vivieron un rato como export de este archivo y eso los convertía en
+ * endpoint público: toda función exportada desde un módulo "use server" es
+ * invocable desde el navegador con cualquier argumento. Cualquiera podía
+ * llamar `createPasswordSetupToken("cualquier-uuid")` sin sesión y recibir un
+ * JWT válido 48h para tomar esa cuenta.
+ *
+ * Viven en `src/lib/password-setup.server.ts` (con `server-only`), y solo
+ * deben invocarse desde una Server Action que ya comprobó
+ * `puedeGestionarUsuarios(sesion)`.
  */
-const PASSWORD_SETUP_EXPIRATION = "48h";
-const PASSWORD_SETUP_PURPOSE = "password-setup";
-
-export async function createPasswordSetupToken(userId: string): Promise<string> {
-  return new SignJWT({ userId, purpose: PASSWORD_SETUP_PURPOSE })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime(PASSWORD_SETUP_EXPIRATION)
-    .sign(getClave());
-}
-
-export async function verifyPasswordSetupToken(token: string): Promise<{ userId: string } | null> {
-  try {
-    const { payload } = await jwtVerify(token, getClave(), { algorithms: ["HS256"] });
-    if (payload.purpose !== PASSWORD_SETUP_PURPOSE || typeof payload.userId !== "string") {
-      return null;
-    }
-    return { userId: payload.userId };
-  } catch {
-    return null;
-  }
-}
