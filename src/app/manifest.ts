@@ -39,14 +39,18 @@ export default function manifest(): MetadataRoute.Manifest {
        * Android aplica su máscara al icono compartido y lo recorta, así que la
        * marca sale mordida en el cajón de aplicaciones.
        *
-       * Hoy los dos apuntan al mismo PNG porque todavía no existe una versión
-       * con la zona segura del 20% que exige `maskable`. Eso llega con el resto
-       * del hito 7; declarar los propósitos por separado desde ahora hace que
-       * sustituir el archivo sea cambiar una ruta.
+       * `pwa-maskable-512x512.png` es un archivo aparte, generado con
+       * `scripts/generar-iconos-pwa.ts`: isotipo al 80% central (20% de zona
+       * segura alrededor) sobre fondo blanco sólido, nunca transparente.
        */
       { src: "/pwa-192x192.png", sizes: "192x192", type: "image/png", purpose: "any" },
       { src: "/pwa-512x512.png", sizes: "512x512", type: "image/png", purpose: "any" },
-      { src: "/pwa-512x512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+      {
+        src: "/pwa-maskable-512x512.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "maskable",
+      },
     ],
   };
 }

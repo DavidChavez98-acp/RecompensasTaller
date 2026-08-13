@@ -3,15 +3,19 @@
  * LinkedIn: www.linkedin.com/in/dschavez0512
  * Application: Recompensas Taller
  *
- * Lo que hace falta hoy: cerrar sesión. Exportar datos, eliminar la cuenta y
- * gestionar dispositivos llegan en el hito 7 (LOPDP).
+ * Cuenta del cliente: perfil, dispositivos con el código QR activo, y las dos
+ * acciones LOPDP de autoservicio — exportar datos y eliminar la cuenta.
  */
 
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { cerrarSesionCliente, getSesionCliente } from "@/actions/auth-cliente";
+import { listarDispositivos } from "@/actions/dispositivos";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { DispositivosCliente } from "./DispositivosCliente";
+import { ExportarDatos } from "./ExportarDatos";
+import { EliminarCuenta } from "./EliminarCuenta";
 
 export const metadata = {
   title: "Mi cuenta | Recompensas Taller",
@@ -20,6 +24,8 @@ export const metadata = {
 export default async function CuentaPage() {
   const sesion = await getSesionCliente();
   if (!sesion) return null;
+
+  const dispositivos = await listarDispositivos();
 
   async function salir() {
     "use server";
@@ -44,18 +50,32 @@ export default async function CuentaPage() {
         </CardContent>
       </Card>
 
-      <Link
-        href="/politica-privacidad"
-        className="block text-sm text-primary underline underline-offset-4"
-      >
-        Política de tratamiento de datos
-      </Link>
+      <div className="space-y-2">
+        <h2 className="t-seccion text-muted-foreground">Dispositivos con tu código</h2>
+        <DispositivosCliente clienteId={sesion.clienteId} dispositivos={dispositivos} />
+      </div>
+
+      <div className="space-y-2">
+        <h2 className="t-seccion text-muted-foreground">Tus datos</h2>
+        <ExportarDatos />
+        <Link
+          href="/politica-privacidad"
+          className="block text-sm text-primary underline underline-offset-4"
+        >
+          Política de tratamiento de datos
+        </Link>
+      </div>
 
       <form action={salir}>
         <Button type="submit" variant="outline" className="w-full">
           Cerrar sesión
         </Button>
       </form>
+
+      <div className="space-y-2 pt-2 border-t border-border">
+        <h2 className="t-seccion text-muted-foreground">Eliminar cuenta</h2>
+        <EliminarCuenta />
+      </div>
     </div>
   );
 }

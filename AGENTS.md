@@ -159,7 +159,19 @@ filtrar sin descifrar. El descifrado ocurre **una vez, en el borde de lectura**:
 si añades una consulta directa que esquive los helpers, descifra ahí también.
 
 La baja LOPDP **anonimiza al cliente sin borrar el ledger** — es registro
-contable.
+contable. `anonimizarMiCuenta()` (`src/actions/lopdp.ts`) bloquea la baja si
+hay un canje `solicitado` o `aprobado` sin resolver (puntos ya debitados o
+stock ya reservado quedarían huérfanos), nunca toca `identificacion_idx`
+(`solicitarCodigoOtp` depende de que siga intacto para responder "Acércate al
+taller" en vez de tratar la cédula como nueva), y envía un correo de
+confirmación antes de perder el email descifrado.
+
+**Aplazamiento consciente, no laguna**: hoy no hay ninguna pantalla en
+`/interno` para reactivar a un cliente ya anonimizado que vuelve al taller.
+El código ya deja la puerta abierta (el mensaje de login se lo dice al
+cliente), pero nadie del staff puede revertir `anonimizado_en`. Fuera de
+alcance del hito 8 porque ese hito es cliente-facing; si hace falta,
+es una pantalla nueva en la ficha del cliente con su propio predicado.
 
 ### Canjes
 
@@ -454,4 +466,4 @@ Antes de añadir movimiento, comprobar que la pantalla tiene algo que mostrar.
 | 5 · Canjes e inventario | **Hecho** |
 | 6 · Control (reportes, antifraude, recálculo nocturno) | **Hecho** |
 | 7 · Inventario de marketing (artículos, ledger, salidas, reportes) | **Hecho** |
-| 8 · LOPDP + PWA (cuenta, offline, iconos) | Pendiente |
+| 8 · LOPDP + PWA (cuenta, offline, iconos) | **Hecho** |

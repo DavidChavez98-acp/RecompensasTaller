@@ -217,3 +217,30 @@ export async function sendPasswordSetupInvite(params: {
     text: `Establece tu contraseña aquí: ${params.url}`,
   });
 }
+
+/**
+ * Confirmación de baja LOPDP. Se envía al correo QUE TENÍA el cliente antes de
+ * anonimizarlo — después del UPDATE ese campo ya es NULL, así que el llamador
+ * tiene que capturarlo antes.
+ */
+export async function sendAccountDeletionConfirmation(params: {
+  to: string;
+  nombre: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const bodyHtml = `
+    <p style="margin:0 0 16px;color:#374151;font-size:14px;">Hola ${params.nombre}, confirmamos que eliminamos tu cuenta de Recompensas Taller.</p>
+    <p style="margin:0 0 16px;color:#374151;font-size:14px;">Borramos tus datos personales (nombres, cédula, correo y teléfono). Por ser un registro contable del programa, conservamos de forma anónima tu historial de puntos y canjes, sin ningún dato que te identifique.</p>
+    <p style="margin:0;color:#6b7280;font-size:13px;">Si no pediste esta eliminación, acércate al taller de inmediato.</p>
+  `;
+
+  return sendEmail({
+    to: params.to,
+    subject: "Confirmamos la eliminación de tu cuenta",
+    html: renderEmailLayout({
+      title: "Cuenta eliminada",
+      subtitle: "Recompensas Taller · Grupo Palacios",
+      bodyHtml,
+    }),
+    text: `Confirmamos que eliminamos tu cuenta de Recompensas Taller. Borramos tus datos personales; el historial de puntos se conserva de forma anónima por ser un registro contable.`,
+  });
+}

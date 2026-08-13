@@ -48,9 +48,11 @@ export const metadata: Metadata = {
      * pestaña— ese texto es una mancha ilegible. El instrumento aguanta
      * cualquier tamaño porque es una forma, no palabras.
      *
-     * El apple-touch-icon 180×180 PNG sin canal alfa llega en el hito 7 (PWA):
-     * usar la marca con transparencia se vería con fondo negro en el home de
-     * iOS, así que se deja pendiente en vez de improvisar uno malo.
+     * El apple-touch-icon NO se declara aquí: `src/app/apple-icon.png`
+     * (180×180, fondo blanco sólido, sin canal alfa) usa la convención de
+     * archivo especial de Next.js y el App Router genera solo el
+     * <link rel="apple-touch-icon">. Generado con
+     * `scripts/generar-iconos-pwa.ts`.
      */
     icon: "/logo-gp-isotipo.svg",
   },
