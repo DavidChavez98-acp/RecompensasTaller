@@ -264,9 +264,62 @@ export const reglaPuntosSchema = z.object({
   puntos_maximos_transaccion: z.number().int().positive().nullable(),
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Personal interno (/interno/usuarios)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Los 5 valores de `user_role`, en el mismo orden que el enum de Postgres. */
+export const rolInternoSchema = z.enum([
+  "Admin",
+  "Jefe de Taller",
+  "Asesor de Servicio",
+  "Jefe de Marketing",
+  "Asesor Comercial",
+]);
+
+/**
+ * Alta de un usuario interno. La cédula es OPCIONAL: solo importa de verdad
+ * para roles que acreditan puntos (Asesor de Servicio, Jefe de Taller), donde
+ * bloquea que un asesor se acredite puntos a sí mismo comparando contra
+ * `clientes.identificacion_idx`. No se fuerza obligatoria para los cinco
+ * roles por igual.
+ */
+export const crearUsuarioSchema = z.object({
+  email: emailSchema,
+  nombre: z.string().trim().min(3, "Escribe el nombre completo").max(120),
+  role: rolInternoSchema,
+  identificacion: identificacionSchema.optional().or(z.literal("")),
+});
+
+export const cambiarRolUsuarioSchema = z.object({
+  userId: z.string().uuid(),
+  role: rolInternoSchema,
+});
+
+export const cambiarEstadoUsuarioSchema = z.object({
+  userId: z.string().uuid(),
+  activo: z.boolean(),
+});
+
+/** bcrypt trunca en 72 bytes: el máximo evita una contraseña que se recorte en silencio. */
+export const passwordSchema = z
+  .string()
+  .min(8, "La contraseña debe tener al menos 8 caracteres")
+  .max(72, "La contraseña es demasiado larga");
+
+/** Paso final de la invitación: el token firmado ES la prueba de autorización. */
+export const definirPasswordSchema = z.object({
+  token: z.string().min(1),
+  password: passwordSchema,
+});
+
 export type SolicitarOtpInput = z.infer<typeof solicitarOtpSchema>;
 export type RegistroClienteInput = z.infer<typeof registroClienteSchema>;
 export type AcreditarPuntosInput = z.infer<typeof acreditarPuntosSchema>;
 export type SolicitarCanjeInput = z.infer<typeof solicitarCanjeSchema>;
 export type PremioInput = z.infer<typeof premioSchema>;
 export type ReglaPuntosInput = z.infer<typeof reglaPuntosSchema>;
+export type CrearUsuarioInput = z.infer<typeof crearUsuarioSchema>;
+export type CambiarRolUsuarioInput = z.infer<typeof cambiarRolUsuarioSchema>;
+export type CambiarEstadoUsuarioInput = z.infer<typeof cambiarEstadoUsuarioSchema>;
+export type DefinirPasswordInput = z.infer<typeof definirPasswordSchema>;
