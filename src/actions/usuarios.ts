@@ -121,7 +121,8 @@ async function enviarInvitacion(
 ): Promise<{ ok: boolean; error?: string }> {
   const token = await createPasswordSetupToken(userId);
   const url = `${getBaseUrl()}/interno/definir-password?token=${token}`;
-  return sendPasswordSetupInvite({ to: email, nombre, url });
+  const resultado = await sendPasswordSetupInvite({ to: email, nombre, url });
+  return { ok: resultado.success, error: resultado.error };
 }
 
 export async function crearUsuario(entrada: {
