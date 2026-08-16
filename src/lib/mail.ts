@@ -145,7 +145,7 @@ const BRAND_RED = "#C81E1E";
 export function getBaseUrl(): string {
   if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
   if (process.env.NODE_ENV !== "production") return "http://localhost:3000";
-  return "https://recompensas.grupopalacios.com.ec";
+  return "https://puntos.taller.grupopalacios.com.ec";
 }
 
 function renderEmailLayout(params: { title: string; subtitle: string; bodyHtml: string }): string {
