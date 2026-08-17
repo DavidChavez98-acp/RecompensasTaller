@@ -4,32 +4,8 @@
  * Application: Recompensas Taller
  */
 
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { NextConfig } from "next";
 import withPWAInit from "@ducanh2912/next-pwa";
-
-/**
- * `navigateFallback: "/offline"` (más abajo) exige que esa URL exista en el
- * manifiesto de precache: `createHandlerBoundToURL`, la función de
- * workbox-precaching que resuelve ese fallback, lo hace de forma SÍNCRONA al
- * evaluar el service worker — si la URL no está en el manifiesto lanza
- * `WorkboxError('non-precached-url')` ahí mismo, no en la primera navegación
- * offline. El resultado es que el service worker ENTERO deja de instalarse
- * en producción, no solo el fallback.
- *
- * `/offline` es una página del App Router (`src/app/offline/page.tsx`), no
- * un archivo físico bajo `public/`, así que el glob de `GenerateSW` nunca la
- * descubre por sí solo — a diferencia de `/_next/static/**` o los PNG de
- * `public/`, que sí aparecen solos en el manifiesto. Hay que declararla a
- * mano con `additionalManifestEntries`. La revisión se deriva del contenido
- * del archivo para que el service worker solo la re-precachee cuando el
- * texto de la página cambia de verdad, no en cada build.
- */
-const revisionPaginaOffline = createHash("md5")
-  .update(readFileSync(join(process.cwd(), "src/app/offline/page.tsx")))
-  .digest("hex");
 
 /**
  * IMPORTANTE — Turbopack vs. webpack (Next.js 16):
@@ -63,14 +39,18 @@ const withPWA = withPWAInit({
   workboxOptions: {
     clientsClaim: true,
     skipWaiting: true,
-    // Ver el comentario junto a `revisionPaginaOffline` más arriba: sin esta
-    // entrada, `navigateFallback` apunta a una URL que no está en el
-    // precache y el service worker no llega a instalarse.
-    additionalManifestEntries: [{ url: "/offline", revision: revisionPaginaOffline }],
-    // Navegación sin red → página que explica que el QR SÍ funciona offline
-    // (el caso de uso crítico) y que el saldo mostrado puede estar viejo.
-    navigateFallback: "/offline",
-    navigateFallbackDenylist: [/^\/interno/, /^\/api/],
+    // NO uses `navigateFallback` aquí: en workbox-webpack-plugin es el patrón
+    // de app-shell de una SPA — intercepta TODA navegación fuera del
+    // denylist de forma INCONDICIONAL, sirviendo siempre la URL fijada, haya
+    // red o no. No es "si falla la red, cae a esto". Se probó en producción:
+    // la primera navegación cargaba bien, pero desde la segunda en adelante
+    // el Service Worker servía `/offline` a cualquier visitante real,
+    // conectado o no — rompía toda la app de cara al cliente. Un offline
+    // fallback de verdad (que solo dispare cuando la red falla de verdad)
+    // necesita `setCatchHandler` de Workbox, que este plugin no expone en
+    // modo `GenerateSW` — requeriría pasar a `InjectManifest` con un service
+    // worker propio. Server-only page `/offline` queda en el repo por si se
+    // implementa eso después; hoy no está enlazada desde ningún lado.
     runtimeCaching: [
       // 0. El panel interno NUNCA se cachea: el personal no debe ver saldos
       //    ni colas de canje obsoletos mientras atiende a un cliente.

@@ -144,7 +144,7 @@ test("analizarToken rechaza basura y acepta el token dentro de una URL", async (
   assert.equal(analizarToken("XX1.a.b.c"), null, "prefijo equivocado");
 
   const { token } = await construirToken(DISPOSITIVO, SECRETO, PASO);
-  const desdeUrl = analizarToken(`https://puntos.taller.grupopalacios.com.ec/q/${token}`);
+  const desdeUrl = analizarToken(`https://recompensas.grupopalacios.com.ec/q/${token}`);
   assert.notEqual(desdeUrl, null, "debe aceptar el token embebido en una URL");
   assert.equal(desdeUrl?.dispositivoId, DISPOSITIVO);
 });
